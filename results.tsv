@@ -1,0 +1,7 @@
+commit	format_pass_rate	exact_match_rate	amount_acc	category_acc	account_acc	avg_reward	avg_latency_ms	status	description
+json_baseline	99.50	65.75	76.00	86.00	93.00	3.72	742.00	keep	JSON baseline (Exp-1)
+compressed_baseline	99.25	76.50	89.00	87.00	95.00	3.83	280.00	keep	Compressed format (Exp-3), champion
+json_label_smooth_01	99.50	65.25	76.00	87.00	94.00	3.79	700.00	discard	JSON + label_smoothing 0.1 (slightly worse)
+compressed_label_smooth_01	99.25	74.25	89.00	85.00	95.00	3.82	295.00	discard	Compressed + label_smoothing 0.1
+compressed_lr_1e4	99.25	51.00	69.00	85.00	94.00	3.62	300.00	discard	Compressed + LR 1e-4 (way worse)
+compressed_nlayers12	99.00	75.50	90.00	86.00	95.00	3.83	420.00	discard	Compressed + n_layers=12 (41M, no improvement)
