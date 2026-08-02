@@ -7,18 +7,18 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from model.model import MiniMindLM, ModelConfig
+from model.model import BookkeepingLM, ModelConfig
 from model.tokenizer import BookkeepingTokenizer
 from dataset import BookkeepingDataset
 from trainer.validate_json import extract_tool_call, validate_record
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="MiniMind 離線記帳模型全量微調 (Full SFT)")
+    parser = argparse.ArgumentParser(description="記帳模型從頭訓練 SFT (From Scratch)")
     parser.add_argument("--train_path", type=str, default="./dataset/train_strata.jsonl", help="訓練集 JSONL 路徑")
     parser.add_argument("--val_path", type=str, default="./dataset/test_strata.jsonl", help="驗證集 JSONL 路徑")
-    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="基礎模型名稱或路徑")
+    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="分詞器基礎模型名稱或路徑")
     parser.add_argument("--save_dir", type=str, default="./saves", help="模型 Checkpoint 儲存目錄")
-    parser.add_argument("--epochs", type=int, default=8, help="微調的總 Epoch 數")
+    parser.add_argument("--epochs", type=int, default=8, help="訓練的總 Epoch 數")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch 大小")
     parser.add_argument("--lr", type=float, default=2e-4, help="學習率")
     parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup 步數比例")
@@ -126,7 +126,7 @@ def main():
 
     # 1. 初始化設備
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"=== 啟動 MiniMind 全量微調 (Full SFT) ===")
+    print(f"=== 啟動記帳模型 SFT 訓練 (From Scratch) ===")
     print(f"運行裝置: {device}")
     print(f"訓練格式: {args.format}")
 
@@ -141,12 +141,24 @@ def main():
         config_kwargs['d_model'] = args.d_model
     config_kwargs['dropout'] = args.dropout
     config = ModelConfig(**config_kwargs)
-    model = MiniMindLM(config).to(device)
+    model = BookkeepingLM(config).to(device)
     
     # 若有指定預訓練權重，則載入到隨機初始化的模型上
     if args.pretrained_path:
         if os.path.exists(args.pretrained_path):
             state = torch.load(args.pretrained_path, map_location=device)
+            # 處理 vocab_size 不匹配：修剪或擴展 embedding/output 層
+            for key in ['tok_embeddings.weight', 'output.weight']:
+                if key in state and state[key].shape != model.state_dict()[key].shape:
+                    old_shape = state[key].shape
+                    new_shape = model.state_dict()[key].shape
+                    print(f"注意: {key} 形狀不匹配 ({old_shape} vs {new_shape})，正在調整...")
+                    if old_shape[0] < new_shape[0]:
+                        new_weight = model.state_dict()[key].clone()
+                        new_weight[:old_shape[0]] = state[key]
+                        state[key] = new_weight
+                    else:
+                        state[key] = state[key][:new_shape[0]]
             model.load_state_dict(state, strict=False)
             print(f"已載入預訓練權重: {args.pretrained_path}")
         else:
@@ -228,18 +240,14 @@ def main():
         print(f"  - JSON 格式通過率 (JSON_Format_Pass_Rate): {format_pass_rate:.2f}%")
         print(f"  - 欄位合規率 (Schema_Valid_Rate)      : {valid_record_rate:.2f}%")
 
-        # 8. 動態保存 Best Checkpoint (以格式通過率為首要指標)
-        # 這能確保我們選出的模型，在前端 PWA WASM 運行時最不容易發生格式毀損
-        is_best_format = format_pass_rate > best_format_rate
-        is_best_loss = (abs(format_pass_rate - best_format_rate) < 1e-4) and (val_loss < best_val_loss)
-        
-        if is_best_format or is_best_loss:
-            best_format_rate = format_pass_rate
+        # 8. 動態保存 Best Checkpoint (以驗證 Loss 為首要指標)
+        if (val_loss < best_val_loss) or (abs(val_loss - best_val_loss) < 1e-6 and format_pass_rate > best_format_rate):
             best_val_loss = val_loss
+            best_format_rate = format_pass_rate
             
             checkpoint_path = os.path.join(args.save_dir, "best_bookkeeping_model.pt")
             torch.save(model.state_dict(), checkpoint_path)
-            print(f"[SUCCESS] 發現更優模型！已保存至: {checkpoint_path} (Format Pass: {best_format_rate:.2f}%)")
+            print(f"[SUCCESS] 發現更優模型！已保存至: {checkpoint_path} (Val Loss: {best_val_loss:.4f})")
             
             # 同步保存一份 HF 格式設定與權重方便後續 ONNX / GGUF 匯出
             # model.save_pretrained(...) 等邏輯可在 Spike 後對齊

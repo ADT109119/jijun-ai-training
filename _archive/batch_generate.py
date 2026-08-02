@@ -20,104 +20,93 @@ ACCOUNTS = [
 ]
 
 # ─── Level-2 Noise templates ───
+# Each lambda takes (c=category, a=account, m=amount)
 NOISE_TEXTS_EXPENSE = [
-    # 餐飲
-    lambda c,a: f"今天中午跟同事去{a}附近新開的那家{c}吃了商業午餐，味道還不錯但價格有點小貴總共花了{a.split()[0] if len(a.split())>1 else ''}好飽喔～",
-    lambda c,a: f"下班後超餓的，路過{c}買了個便當跟飲料，老闆人很好還多送了一碗湯，總共{a}元用{a}結帳的😋",
-    lambda c,a: f"哇今天跟好久不見的朋友約吃{c}，聊了三個小時超開心，吃下來一個人{a}元刷信用卡，值得啦！",
-    lambda c,a: f"昨天叫了熊貓外送點{c}，滿額折價後只要{a}元用LINE Pay付款，下雨天懶得出門的好選擇～",
-    lambda c,a: f"早上趕時間去{c}買了三明治跟大冰拿，花{a}元用悠遊卡嗶一下就走超方便！",
-    # 休閒娛樂
-    lambda c,a: f"週末去{c}玩了一整天，門票加餐飲總共花了{a}元，用信用卡買票還有打折耶，開心！",
-    lambda c,a: f"昨天跟朋友去唱KTV從下午唱到晚上，一個人分攤{a}元用{a}結帳，唱到燒聲了哈哈😂",
-    lambda c,a: f"Netflix這個月又漲價了啦，但還是繼續訂因為太多劇想追了，月費{a}元刷信用卡，宅宅日常～",
-    lambda c,a: f"今天去逛{c}本來只是隨便走走，結果不小心手滑買了東西花了{a}元用LINE Pay⋯錢包對不起🥲",
-    # 交通
-    lambda c,a: f"今天上下班都搭{a}，早上刷了一次下午又刷了一次，一天交通費{a}元，比騎車還省油錢啦！",
-    lambda c,a: f"下雨天不想淋雨叫了Uber去公司，結果塞車花了{a}元用信用卡付款，心痛比雨還大😭",
-    lambda c,a: f"上週{a}儲值了{a}元，結果這一週每天搭捷運公車用到現在快見底了，台北通勤真的好花錢啊～",
-    lambda c,a: f"今天騎{a}去辦事，還車的時候扣了{a}元，半小時內免費的政策沒了以後好貴⋯",
-    # 日常雜貨
-    lambda c,a: f"去{c}補貨買了衛生紙洗碗精跟零食，結帳{a}元用{a}付的，每次去{c}沒有千元走不出來😂",
-    lambda c,a: f"全聯週六有會員日優惠！買了牛奶雞蛋跟一些蔬果花了{a}元用{a}結帳，省了大概50塊吧～",
-    lambda c,a: f"家裡洗髮精沐浴乳都用完了，去屈臣氏補了一批花了{a}元刷信用卡，還好有活動買一送一💪",
-    lambda c,a: f"今天去好市多補貨，一大車東西結帳{a}元用{a}付款，每次去都覺得自己是土豪結完帳就後悔了🤣",
-    # 服飾美妝
-    lambda c,a: f"換季了去{c}買了幾件衣服，特價區挖到寶總共{a}元用{a}刷的，衣櫃又爆炸了但好開心🎉",
-    lambda c,a: f"週年慶真的太可怕了⋯買了一組保養品跟兩支口紅花了{a}元刷信用卡，但贈品拿得好爽😂",
-    lambda c,a: f"路過{c}看到櫥窗那件外套太好看了，試穿後直接買了{a}元用Apple Pay，衝動購物的我沒救了～",
-    # 3C/數位
-    lambda c,a: f"買了新的{a}保護殼加充電線總共{a}元用{a}付款，舊的用了兩年終於退役了～",
-    lambda c,a: f"Steam秋季特賣又來了！買了好幾款願望清單的遊戲總共{a}元刷信用卡，錢包已死有事燒紙💀",
-    lambda c,a: f"Spotify家庭方案這個月由我主揪，六個人分攤一個人{a}元，六個都收齊了用LINE Pay轉給我～",
-    # 寵物
-    lambda c,a: f"家裡那隻挑嘴貓只有某牌罐頭才吃，今天去補貨買了兩打花{a}元用{a}結帳，主子開心就好😺",
-    lambda c,a: f"帶狗狗去洗澡加剪毛花了{a}元用{a}付款，洗完變超帥的狗界歐巴～🐕",
-    # 醫療
-    lambda c,a: f"最近過敏性鼻炎又發作了去藥局買噴劑跟藥花了{a}元用{a}付，鼻子暢通的感覺真好～",
-    lambda c,a: f"今天去复健科做物理治療，掛號加自費療程{a}元刷信用卡，長期坐辦公室的職業傷害啊⋯",
-    # 教育
-    lambda c,a: f"買了{c}的線上課程特價只要{a}元用{a}付款，趁打折入手充實一下自己💪",
-    lambda c,a: f"去書局買了兩本{c}相關的書跟一本筆記本總共{a}元用{a}結帳，好久沒認真看書了要加油📚",
-    # 家居
-    lambda c,a: f"去IKEA買了個收納櫃回家自己組，花了{a}元用{a}付款，DIY的樂趣無窮但手好痠😅",
-    lambda c,a: f"房間缺一盞檯燈去生活工場買了一盞設計款{a}元用{a}結帳，房間氣氛瞬間升級了～",
-    # 運動
-    lambda c,a: f"報名下個月的路跑活動報名費{a}元用{a}付款，為了這個要開始訓練了不然跑不完🏃",
-    lambda c,a: f"買了一張瑜伽墊跟兩顆彈力帶總共{a}元用{a}結帳，在家運動省健身房月費也不錯～",
-    # 生活繳費
-    lambda c,a: f"收到這期的{a}帳單{a}元，順手用{a}繳掉了，這種固定支出每個月都好幾筆😮‍💨",
-    lambda c,a: f"手機帳單來了{a}元用{a}自動扣繳，4G吃到飽用習慣了懶得換～",
-    # 人情
-    lambda c,a: f"朋友生日請她吃了一頓{c}花了{a}元用{a}結帳，生日快樂呀～最好的朋友值得🎂",
-    lambda c,a: f"同事結婚大家一起合買禮物我出了{a}元用{a}轉給主揪，希望他們幸福久久💑",
-    # 保險
-    lambda c,a: f"{c}保費又扣款了{a}元從{a}自動轉帳，雖然每個月多一筆但買個安心啦～",
-    lambda c,a: f"幫毛小孩保的寵物險月繳{a}元從{a}自動扣，狗狗也是家人要好好保護牠🐾",
-    # 投資
-    lambda c,a: f"每月定期定額{a}扣款{a}元，不知不覺也存了好幾年了持續累積被動收入📈",
+    lambda c,a,m: f"今天中午跟同事去公司附近新開的那家{c}吃了商業午餐，味道還不錯但價格有點小貴總共花了{m}元好飽喔～",
+    lambda c,a,m: f"下班後超餓的，路過{c}買了個便當跟飲料，老闆人很好還多送了一碗湯，總共{m}元用{a}結帳的😋",
+    lambda c,a,m: f"哇今天跟好久不見的朋友約吃{c}，聊了三個小時超開心，吃下來一個人{m}元刷信用卡，值得啦！",
+    lambda c,a,m: f"昨天叫了熊貓外送點{c}，滿額折價後只要{m}元用LINE Pay付款，下雨天懶得出門的好選擇～",
+    lambda c,a,m: f"早上趕時間去{c}買了三明治跟大冰拿，花{m}元用悠遊卡嗶一下就走超方便！",
+    lambda c,a,m: f"週末去{c}玩了一整天，門票加餐飲總共花了{m}元，用信用卡買票還有打折耶，開心！",
+    lambda c,a,m: f"昨天跟朋友去唱KTV從下午唱到晚上，一個人分攤{m}元用{a}結帳，唱到燒聲了哈哈😂",
+    lambda c,a,m: f"Netflix這個月又漲價了啦，但還是繼續訂因為太多劇想追了，月費{m}元刷信用卡，宅宅日常～",
+    lambda c,a,m: f"今天去逛{c}本來只是隨便走走，結果不小心手滑買了東西花了{m}元用LINE Pay⋯錢包對不起🥲",
+    lambda c,a,m: f"今天上下班都搭{a}，早上刷了一次下午又刷了一次，一天交通費{m}元，比騎車還省油錢啦！",
+    lambda c,a,m: f"下雨天不想淋雨叫了Uber去公司，結果塞車花了{m}元用信用卡付款，心痛比雨還大😭",
+    lambda c,a,m: f"上週{a}儲值了{m}元，結果這一週每天搭捷運公車用到現在快見底了，台北通勤真的好花錢啊～",
+    lambda c,a,m: f"今天騎{a}去辦事，還車的時候扣了{m}元，半小時內免費的政策沒了以後好貴⋯",
+    lambda c,a,m: f"去{c}補貨買了衛生紙洗碗精跟零食，結帳{m}元用{a}付的，每次去{c}沒有千元走不出來😂",
+    lambda c,a,m: f"全聯週六有會員日優惠！買了牛奶雞蛋跟一些蔬果花了{m}元用{a}結帳，省了大概50塊吧～",
+    lambda c,a,m: f"家裡洗髮精沐浴乳都用完了，去屈臣氏補了一批花了{m}元刷信用卡，還好有活動買一送一💪",
+    lambda c,a,m: f"今天去好市多補貨，一大車東西結帳{m}元用{a}付款，每次去都覺得自己是土豪結完帳就後悔了🤣",
+    lambda c,a,m: f"換季了去{c}買了幾件衣服，特價區挖到寶總共{m}元用{a}刷的，衣櫃又爆炸了但好開心🎉",
+    lambda c,a,m: f"週年慶真的太可怕了⋯買了一組保養品跟兩支口紅花了{m}元刷信用卡，但贈品拿得好爽😂",
+    lambda c,a,m: f"路過{c}看到櫥窗那件外套太好看了，試穿後直接買了{m}元用Apple Pay，衝動購物的我沒救了～",
+    lambda c,a,m: f"買了新的3C保護殼加充電線總共{m}元用{a}付款，舊的用了兩年終於退役了～",
+    lambda c,a,m: f"Steam秋季特賣又來了！買了好幾款願望清單的遊戲總共{m}元刷信用卡，錢包已死有事燒紙💀",
+    lambda c,a,m: f"Spotify家庭方案這個月由我主揪，六個人分攤一個人{m}元，六個都收齊了用LINE Pay轉給我～",
+    lambda c,a,m: f"家裡那隻挑嘴貓只有某牌罐頭才吃，今天去補貨買了兩打花{m}元用{a}結帳，主子開心就好😺",
+    lambda c,a,m: f"帶狗狗去洗澡加剪毛花了{m}元用{a}付款，洗完變超帥的狗界歐巴～🐕",
+    lambda c,a,m: f"最近過敏性鼻炎又發作了去藥局買噴劑跟藥花了{m}元用{a}付，鼻子暢通的感覺真好～",
+    lambda c,a,m: f"今天去复健科做物理治療，掛號加自費療程{m}元刷信用卡，長期坐辦公室的職業傷害啊⋯",
+    lambda c,a,m: f"買了{c}的線上課程特價只要{m}元用{a}付款，趁打折入手充實一下自己💪",
+    lambda c,a,m: f"去書局買了兩本{c}相關的書跟一本筆記本總共{m}元用{a}結帳，好久沒認真看書了要加油📚",
+    lambda c,a,m: f"去IKEA買了個收納櫃回家自己組，花了{m}元用{a}付款，DIY的樂趣無窮但手好痠😅",
+    lambda c,a,m: f"房間缺一盞檯燈去生活工場買了一盞設計款{m}元用{a}結帳，房間氣氛瞬間升級了～",
+    lambda c,a,m: f"報名下個月的路跑活動報名費{m}元用{a}付款，為了這個要開始訓練了不然跑不完🏃",
+    lambda c,a,m: f"買了一張瑜伽墊跟兩顆彈力帶總共{m}元用{a}結帳，在家運動省健身房月費也不錯～",
+    lambda c,a,m: f"收到這期的{c}帳單{m}元，順手用{a}繳掉了，這種固定支出每個月都好幾筆😮‍💨",
+    lambda c,a,m: f"手機帳單來了{m}元用{a}自動扣繳，4G吃到飽用習慣了懶得換～",
+    lambda c,a,m: f"朋友生日請她吃了一頓{c}花了{m}元用{a}結帳，生日快樂呀～最好的朋友值得🎂",
+    lambda c,a,m: f"同事結婚大家一起合買禮物我出了{m}元用{a}轉給主揪，希望他們幸福久久💑",
+    lambda c,a,m: f"{c}保費又扣款了{m}元從{a}自動轉帳，雖然每個月多一筆但買個安心啦～",
+    lambda c,a,m: f"幫毛小孩保的寵物險月繳{m}元從{a}自動扣，狗狗也是家人要好好保護牠🐾",
+    lambda c,a,m: f"每月定期定額{a}扣款{m}元，不知不覺也存了好幾年了持續累積被動收入📈",
 ]
 NOISE_TEXTS_INCOME = [
-    lambda c,a: f"耶！今天發薪日！{c}進來了{a}元入{a}，這個月終於不用吃土了🎉",
-    lambda c,a: f"年終獎金進來了！{c}{a}元匯到{a}，開心到飛起來～過年可以包大包一點了🧧",
-    lambda c,a: f"接了一個外包案子今天收到{c}，{a}元直接入{a}，副業收入越來越穩定了💪",
-    lambda c,a: f"股票配息入帳啦！持有{a}的{c}{a}元進{a}帳戶，被動收入讚讚的📈",
-    lambda c,a: f"今天收到{c}退稅{a}元直接匯到{a}，不無小補每年這時候都小確幸～",
-    lambda c,a: f"房租收入進來了！這個月租客按時匯款{a}元到{a}，穩定的被動收入真棒🏠",
-    lambda c,a: f"賣掉二手手機跟一些用不到的3C用品，總共賣了{a}元匯到{a}，斷捨離還有錢賺太讚了！",
-    lambda c,a: f"公司發的績效獎金{a}元入{a}了，上半年的努力沒有白費🥹",
-    lambda c,a: f"幫朋友接了一個翻譯案子完成後收到{c}，{a}元入{a}，語言能力真的可以變現耶～",
-    lambda c,a: f"美金定存到期了利息加本金總共{a}元入外幣帳戶，被動收入持續累積中🌏",
+    lambda c,a,m: f"耶！今天發薪日！{c}進來了{m}元入{a}，這個月終於不用吃土了🎉",
+    lambda c,a,m: f"年終獎金進來了！{c}{m}元匯到{a}，開心到飛起來～過年可以包大包一點了🧧",
+    lambda c,a,m: f"接了一個外包案子今天收到{c}，{m}元直接入{a}，副業收入越來越穩定了💪",
+    lambda c,a,m: f"股票配息入帳啦！持有股票的{c}{m}元進{a}帳戶，被動收入讚讚的📈",
+    lambda c,a,m: f"今天收到{c}退稅{m}元直接匯到{a}，不無小補每年這時候都小確幸～",
+    lambda c,a,m: f"房租收入進來了！這個月租客按時匯款{m}元到{a}，穩定的被動收入真棒🏠",
+    lambda c,a,m: f"賣掉二手手機跟一些用不到的3C用品，總共賣了{m}元匯到{a}，斷捨離還有錢賺太讚了！",
+    lambda c,a,m: f"公司發的績效獎金{m}元入{a}了，上半年的努力沒有白費🥹",
+    lambda c,a,m: f"幫朋友接了一個翻譯案子完成後收到{c}，{m}元入{a}，語言能力真的可以變現耶～",
+    lambda c,a,m: f"美金定存到期了利息加本金總共{m}元入外幣帳戶，被動收入持續累積中🌏",
 ]
 
 # ─── Level-3 Reasoning templates ───
+# Each lambda takes (c=category, a=account, m=amount)
+# The amounts in the text must be consistent with the label amount m
 REASON_TEXTS_EXPENSE = [
-    lambda c,a: f"這週五天上班日午餐平均一天{a}元，但週三跟客戶吃飯是公司招待不算，所以四天午餐總共{a}元用{a}付的幫我算一下記帳",
-    lambda c,a: f"跟三個朋友去吃{c}總帳單{a}元我先刷卡付了，他們說要各轉{a}元給我，幫我記我實際負擔的部分就好",
-    lambda c,a: f"這個月去了三次{a}，第一次{a}元第二次{a}元第三次{a}元總共刷同一張信用卡，幫我加總記一筆",
-    lambda c,a: f"昨天買衣服{a}元，今天又去買鞋子{a}元，都是同家店刷卡消費，幫我記成同一天的支出",
-    lambda c,a: f"上週跟這週各去了一次好市多，上週花{a}元這週花了{a}元都用同一張卡，幫我算這兩次總共多少錢記下來",
-    lambda c,a: f"今天領包裹的時候順便買了{a}{a}元，但這個是幫同事代買的他明天會還我錢，所以先幫我記但備註寫清楚",
-    lambda c,a: f"我每天搭公車上下班一趟{a}元來回{a}元，一個月上班22天，幫我算一個月交通費總共多少記下來",
-    lambda c,a: f"昨天跟朋友去吃{c}總帳單{a}元總共五個人但壽星免費所以四個人分攤，幫我算一個人多少錢記帳",
-    lambda c,a: f"這個月收到電費帳單{a}元、水費{a}元、瓦斯{a}元，三筆都從銀行帳戶扣了，幫我加總記一筆",
-    lambda c,a: f"報名了一個線上課程{a}元加教材費{a}元總共{a}元用{a}付款，幫我記整筆支出",
-    lambda c,a: f"今天去健身房繳了入會費{a}元加第一個月月費{a}元總共{a}元用{a}結帳，幫我合計一筆",
-    lambda c,a: f"訂了兩箱貓砂{a}元跟三箱罐頭{a}元總共{a}元用{a}付款，幫我合併記一筆寵物支出",
-    lambda c,a: f"買了專業級{a}{a}元還買了保護套{a}元總共{a}元用{a}，幫我記一筆",
-    lambda c,a: f"今天去醫院掛了兩科，眼科{a}元牙科{a}元總共{a}元刷信用卡，幫我合計一筆醫療保健支出",
-    lambda c,a: f"這個月訂閱了Netflix{a}元Spotify{a}元跟iCloud{a}元總共{a}元都刷同一張信用卡，幫我記一筆數位服務總支出",
+    lambda c,a,m: f"這週五天上班日午餐平均一天{m}元，但週三跟客戶吃飯是公司招待不算，所以四天午餐總共{m}元用{a}付的幫我算一下記帳",
+    lambda c,a,m: f"跟三個朋友去吃{c}總帳單{m}元我先刷卡付了，他們說要各轉{int(m/4)}元給我，幫我記我實際負擔的部分就好",
+    lambda c,a,m: f"這個月去了三次{c}，每次大概{m}元總共刷同一張{a}，幫我加總記一筆",
+    lambda c,a,m: f"昨天買衣服{int(m/2)}元，今天又去買鞋子{int(m/2)}元，都是同家店刷卡消費用{a}，幫我記成同一天的支出",
+    lambda c,a,m: f"上週跟這週各去了一次，上週花{int(m/2)}元這週花了{int(m/2)}元都用同一張{a}，幫我算這兩次總共多少錢記下來",
+    lambda c,a,m: f"今天領包裹的時候順便買了東西花了{m}元用{a}，但這個是幫同事代買的他明天會還我錢，所以先幫我記但備註寫清楚",
+    lambda c,a,m: f"我每天搭公車上下班一趟{int(round(m/44))}元來回{int(round(m/22))}元，一個月上班22天，幫我算一個月交通費總共多少記下來",
+    lambda c,a,m: f"昨天跟朋友去吃{c}總帳單{m}元總共五個人但壽星免費所以四個人分攤，幫我算一個人多少錢記帳",
+    lambda c,a,m: f"這個月收到電費帳單{int(m/3)}元、水費{int(m/3)}元、瓦斯{int(m/3)}元，三筆都從{a}扣了，幫我加總記一筆",
+    lambda c,a,m: f"報名了一個線上課程{m}元用{a}付款，幫我記整筆支出",
+    lambda c,a,m: f"今天去健身房繳了入會費加月費總共{m}元用{a}結帳，幫我合計一筆",
+    lambda c,a,m: f"訂了寵物用品總共{m}元用{a}付款，幫我合併記一筆寵物支出",
+    lambda c,a,m: f"買了設備加保護套總共{m}元用{a}，幫我記一筆",
+    lambda c,a,m: f"今天去醫院掛了兩科總共{m}元刷{a}，幫我合計一筆醫療保健支出",
+    lambda c,a,m: f"這個月訂閱了幾個服務總共{m}元都刷同一張{a}，幫我記一筆數位服務總支出",
 ]
 
 REASON_TEXTS_INCOME = [
-    lambda c,a: f"本薪{a}元加伙食津貼{a}元總共{a}元入{a}，但這是這個月的總收入幫我分開記也可以合計",
-    lambda c,a: f"上週接了一個案子今天收到訂金{a}元說下週完工再付尾款{a}元總共{a}元，先記今天這筆就好",
-    lambda c,a: f"公司發了中秋禮金{a}元跟端午禮金{a}元一起入了{a}帳戶，這是兩個節日的幫我各記一筆或記總額",
-    lambda c,a: f"股票配息{a}元加上基金配息{a}元總共{a}元入{a}帳戶，被動收入幫我一筆記",
-    lambda c,a: f"賣掉一些用不到的3C產品總共賣了{a}元扣掉平台手續費{a}元實拿{a}元入{a}，幫我記實收金額",
+    lambda c,a,m: f"本薪加各項津貼總共{m}元入{a}，但這是這個月的總收入幫我分開記也可以合計",
+    lambda c,a,m: f"上週接了一個案子今天收到訂金{int(m*0.3)}元說下週完工再付尾款{int(m*0.7)}元總共{m}元，先記今天這筆就好",
+    lambda c,a,m: f"公司發了獎金總共{m}元入了{a}帳戶，這是一整筆的幫我記",
+    lambda c,a,m: f"股票配息加上基金配息總共{m}元入{a}帳戶，被動收入幫我一筆記",
+    lambda c,a,m: f"賣掉一些用不到的3C產品總共賣了{int(m*0.9)}元扣掉平台手續費{int(m*0.1)}元實拿{m}元入{a}，幫我記實收金額",
 ]
 
 def build_sample(diff_level, cat, acc, amt, desc, rtype, user_text):
+    today = "2026-07-20"
     sub_cats = random.sample(CATEGORIES, k=random.randint(4, 6))
     if cat not in sub_cats:
         sub_cats[-1] = cat
@@ -134,13 +123,14 @@ def build_sample(diff_level, cat, acc, amt, desc, rtype, user_text):
                 "category": {"type": "string", "enum": sub_cats},
                 "account": {"type": "string", "enum": sub_accs},
                 "description": {"type": "string"},
-                "type": {"type": "string", "enum": ["expense", "income"]}
+                "type": {"type": "string", "enum": ["expense", "income"]},
+                "date": {"type": "string", "description": "ISO 8601 格式日期，例如 YYYY-MM-DD"}
             },
-            "required": ["amount", "category", "account", "type"]
+            "required": ["amount", "category", "account", "type", "date"]
         }
     }
-    system_content = "你是一個記帳助理。你被賦予了以下 tools:\n" + json.dumps(tool_def, ensure_ascii=False)
-    args_dict = {"amount": amt, "category": cat, "account": acc, "description": desc, "type": rtype}
+    system_content = f"今天是 {today}。你是一個記帳助理。你被賦予了以下 tools:\n" + json.dumps(tool_def, ensure_ascii=False)
+    args_dict = {"amount": amt, "category": cat, "account": acc, "description": desc, "type": rtype, "date": today}
     inner = json.dumps({"name": "add_record", "args": args_dict}, ensure_ascii=True)
     assistant_content = "<tool_call>" + inner + "</tool_call>"
     return {
@@ -157,9 +147,13 @@ def generate_batch(count_l1=0, count_l2=0, count_l3=0):
     used_signatures = set()
 
     def gen_one(diff, cat, acc, amt, desc, rtype, text_fn):
-        # Build text with proper account/amount substitution
         try:
-            text = text_fn(cat, acc) if "{cat}" in text_fn.__code__.co_varnames[:text_fn.__code__.co_argcount] else text_fn(cat, acc)
+            text = text_fn(cat, acc, amt)
+        except TypeError:
+            try:
+                text = text_fn(cat, acc)
+            except:
+                text = text_fn(cat, acc)
         except:
             text = text_fn(cat, acc)
         sig = (diff, cat, acc, amt, desc, rtype, text[:30])
@@ -233,20 +227,20 @@ def generate_batch(count_l1=0, count_l2=0, count_l3=0):
     # Level-1 Simple generation
     l1_expense_templates = [
         ("買{c}用{a}", ["去","在"], ["店裡","超商","賣場"], ["飲料","零食","麵包"], "花了{amt}元用{a}付的。"),
-        ("{cat}消費{a}", [], [], [], "剛剛在{c}花了{amt}元用{a}付款。"),
-        ("日常{cat}", ["",], ["",], ["",], "{amt}元用{a}付的，買了{c}。"),
-        ("週末{cat}", ["",], ["",], ["",], "{amt}元用{a}結帳，買了{c}。"),
-        ("{cat}{a}", [], [], [], "今天去{c}花了{amt}元，用{a}結帳。"),
+        ("{c}消費", [], [], [], "剛剛在{c}花了{amt}元用{a}付款。"),
+        ("日常{c}", [], [], [], "{amt}元用{a}付的，買了{c}。"),
+        ("週末{c}", [], [], [], "{amt}元用{a}結帳，買了{c}。"),
+        ("{c}{a}", [], [], [], "今天去{c}花了{amt}元，用{a}結帳。"),
     ]
     l1_income_templates = [
-        "{cat}入帳",
-        "{cat}",
+        "{c}入帳",
+        "{c}",
     ]
     l1_income_texts = [
-        "收到{cat}{amt}元匯到{a}了。",
-        "{cat}{amt}元已經入{a}帳戶。",
-        "{cat}{amt}元入帳到{a}。",
-        "今天{a}收到了{cat}{amt}元。",
+        "收到{c}{amt}元匯到{a}了。",
+        "{c}{amt}元已經入{a}帳戶。",
+        "{c}{amt}元入帳到{a}。",
+        "今天{a}收到了{c}{amt}元。",
     ]
     for _ in range(count_l1):
         rtype = "expense" if random.random() < 0.6 else "income"
@@ -259,13 +253,13 @@ def generate_batch(count_l1=0, count_l2=0, count_l3=0):
             store = random.choice(store_tmpl) if store_tmpl else ""
             item = random.choice(item_tmpl) if item_tmpl else ""
             user_text = text_tmpl.format(c=cat, a=acc, amt=amt, place=place, store=store, item=item)
-            desc = desc_tmpl.format(cat=cat, a=acc, amt=amt, place=place, store=store, item=item)
+            desc = desc_tmpl.format(c=cat, a=acc, amt=amt, place=place, store=store, item=item)
         else:
             amt = random.choice([1000, 1200, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000, 22000, 25000, 28000, 30000, 32000, 35000, 38000, 40000, 42000, 45000, 48000, 50000, 52000, 55000, 60000, 65000, 70000, 75000, 80000, 85000, 90000, 100000])
             desc_tmpl = random.choice(l1_income_templates)
             text_tmpl = random.choice(l1_income_texts)
-            user_text = text_tmpl.format(cat=cat, a=acc, amt=amt)
-            desc = desc_tmpl.format(cat=cat, a=acc, amt=amt)
+            user_text = text_tmpl.format(c=cat, a=acc, amt=amt)
+            desc = desc_tmpl.format(c=cat, a=acc, amt=amt)
         sample = gen_one("Level-1 (Simple)", cat, acc, amt, desc, rtype, lambda c, a: user_text)
         if sample:
             samples.append(sample)

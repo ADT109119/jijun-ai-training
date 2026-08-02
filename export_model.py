@@ -3,13 +3,13 @@ import json
 import argparse
 import torch
 import torch.nn as nn
-from model.model import MiniMindLM, ModelConfig
+from model.model import BookkeepingLM, ModelConfig
 from model.tokenizer import BookkeepingTokenizer
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="MiniMind 記帳模型導出工具 (ONNX & GGUF 權重映射)")
-    parser.add_argument("--ckpt_path", type=str, default="./saves/best_bookkeeping_model.pt", help="微調後的 PyTorch .pt 權重路徑")
-    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="基礎 model/tokenizer 路徑")
+    parser = argparse.ArgumentParser(description="記帳模型導出工具 (ONNX & GGUF 權重映射)")
+    parser.add_argument("--ckpt_path", type=str, default="./saves/best_bookkeeping_model.pt", help="訓練完成的 PyTorch .pt 權重路徑")
+    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="分詞器基礎模型名稱或路徑")
     parser.add_argument("--out_dir", type=str, default="./exports", help="導出產物儲存目錄")
     parser.add_argument("--export_onnx", action="store_true", default=True, help="是否導出為 ONNX 格式")
     parser.add_argument("--export_gguf_prep", action="store_true", default=True, help="是否進行 GGUF 權重映射重命名")
@@ -61,7 +61,7 @@ def export_to_onnx(model, tokenizer, config, out_path):
 def convert_to_llama_state_dict(custom_state_dict, config):
     """
     學術與工程核心貢獻：
-    將我們自建的 MiniMind 自定義結構權重，重映射並命名為標準 Llama/Qwen 的權重名稱。
+    將自建的自定義結構權重，重映射並命名為標準 Llama/Qwen 的權重名稱。
     這能讓 llama.cpp 的 convert_hf_to_gguf.py 與 transformers 官方庫直接辨識我們訓練出來的模型！
     """
     llama_state_dict = {}
@@ -80,7 +80,7 @@ def convert_to_llama_state_dict(custom_state_dict, config):
             llama_state_dict[mapping[k]] = v
 
     # 2. 處理逐層的 Transformer 區塊映射
-    # MiniMind Layer 結構對照 Llama Decoder Layer
+    # Layer 結構對照 Llama Decoder Layer
     for i in range(config.n_layers):
         custom_layer_prefix = f"layers.{i}."
         llama_layer_prefix = f"model.layers.{i}."
@@ -104,12 +104,12 @@ def convert_to_llama_state_dict(custom_state_dict, config):
 
 def prepare_gguf_export(ckpt_path, base_model, out_dir, config):
     """
-    載入我們的微調權重，重映射並保存為符合 Hugging Face LlamaForCausalLM 結構的權重目錄。
+    載入訓練完成的權重，重映射並保存為符合 Hugging Face LlamaForCausalLM 結構的權重目錄。
     這樣 llama.cpp 就能無痛讀取此目錄，將其轉換為 GGUF 格式。
     """
     print("正在準備 GGUF 轉換所需的 Llama 權重對齊...")
     
-    # 載入我們的微調權重
+    # 載入訓練完成的權重
     try:
         custom_weights = torch.load(ckpt_path, map_location="cpu")
     except Exception as e:
@@ -158,7 +158,7 @@ def prepare_gguf_export(ckpt_path, base_model, out_dir, config):
     
     print("\n=== Llama-GGUF 權重映射成功 ===")
     print("您現在可以在終端機執行 llama.cpp 的腳本，將此目錄直接轉成 GGUF 格式：")
-    print(f"python llama.cpp/convert_hf_to_gguf.py {hf_dir} --outtype q4_0 --outfile {out_dir}/minimind_bookkeeping.gguf")
+    print(f"python llama.cpp/convert_hf_to_gguf.py {hf_dir} --outtype q4_0 --outfile {out_dir}/bookkeeping_model.gguf")
 
 def main():
     args = parse_args()
@@ -169,21 +169,21 @@ def main():
     config = ModelConfig(vocab_size=tokenizer.vocab_size)
 
     # 載入主模型
-    model = MiniMindLM(config)
+    model = BookkeepingLM(config)
     
-    # 嘗試載入微調權重
+    # 嘗試載入訓練權重
     if os.path.exists(args.ckpt_path):
         try:
             model.load_state_dict(torch.load(args.ckpt_path, map_location="cpu"))
-            print(f"已成功載入微調權重: {args.ckpt_path}")
+            print(f"已成功載入訓練權重: {args.ckpt_path}")
         except Exception as e:
             print(f"警告: 載入權重失敗 ({e})，將以隨機權重進行結構導出測試。")
     else:
-        print(f"警告: 未找到微調權重 {args.ckpt_path}，將以隨機權重進行結構導出測試。")
+        print(f"警告: 未找到訓練權重 {args.ckpt_path}，將以隨機權重進行結構導出測試。")
 
     # 1. 執行 ONNX 導出
     if args.export_onnx:
-        onnx_out_path = os.path.join(args.out_dir, "minimind_bookkeeping.onnx")
+        onnx_out_path = os.path.join(args.out_dir, "bookkeeping_model.onnx")
         export_to_onnx(model, tokenizer, config, onnx_out_path)
 
     # 2. 執行 GGUF 權重映射對齊
