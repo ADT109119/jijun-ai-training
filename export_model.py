@@ -181,10 +181,13 @@ def main():
     else:
         print(f"警告: 未找到訓練權重 {args.ckpt_path}，將以隨機權重進行結構導出測試。")
 
-    # 1. 執行 ONNX 導出
+    # 1. 執行 ONNX 導出 (選填)
     if args.export_onnx:
-        onnx_out_path = os.path.join(args.out_dir, "bookkeeping_model.onnx")
-        export_to_onnx(model, tokenizer, config, onnx_out_path)
+        try:
+            onnx_out_path = os.path.join(args.out_dir, "bookkeeping_model.onnx")
+            export_to_onnx(model, tokenizer, config, onnx_out_path)
+        except Exception as e:
+            print(f"提示: ONNX 導出未完成 ({e})，跳過 ONNX 導出，繼續執行 GGUF 權重映射。")
 
     # 2. 執行 GGUF 權重映射對齊
     if args.export_gguf_prep:
