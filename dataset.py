@@ -9,7 +9,7 @@ class BookkeepingDataset(Dataset):
     核心亮點：
     1. 實作 ChatML 對話模板序列化。
     2. 採用「Label Masking (Loss Masking)」策略，將 system prompt 與 user query 位置的 label 設為 -100。
-       確保模型在全量 SFT 微調時，只對 assistant 輸出的 tool call 欄位計算損失與更新梯度，
+        確保模型在 SFT 訓練時，只對 assistant 輸出的 tool call 欄位計算損失與更新梯度，
        這能有效防止小模型遺忘預訓練語言基礎，並大幅加快收斂速度。
     """
     
@@ -57,6 +57,13 @@ class BookkeepingDataset(Dataset):
             elif msg["role"] == "assistant":
                 assistant_content = msg["content"]
 
+        # 容錯補全 system prompt 中的日期前綴
+        if system_content and not system_content.startswith("今天是 2026-07-20。"):
+            import re
+            if system_content.startswith("今天是"):
+                system_content = re.sub(r"^今天是\s*\d{4}-\d{2}-\d{2}[。，\s]*", "", system_content)
+            system_content = "今天是 2026-07-20。" + system_content
+
         # 2. 如果為壓縮格式，則將 assistant_content 轉換為特殊標記協定
         if self.data_format == "compressed":
             try:
@@ -67,7 +74,8 @@ class BookkeepingDataset(Dataset):
                     category=args.get("category", ""),
                     account=args.get("account", ""),
                     description=args.get("description", ""),
-                    record_type=args.get("type", "expense")
+                    record_type=args.get("type", "expense"),
+                    date=args.get("date", None)
                 )
             except Exception:
                 # 容錯降級：若提取失敗，保留原 assistant_content

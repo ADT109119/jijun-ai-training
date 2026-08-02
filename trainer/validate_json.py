@@ -24,6 +24,10 @@ def extract_tool_call(response_text):
     # 1. 檢測是否為「特殊標記壓縮格式」 (含有專用特殊 token)
     if "[AMT]" in response_text or "[CAT]" in response_text:
         args = {}
+        # 尋找日期
+        date_match = re.search(r"\[DATE\]\s*(\d{4}-\d{2}-\d{2})", response_text)
+        if date_match:
+            args["date"] = date_match.group(1)
         # 尋找金額
         amt_match = re.search(r"\[AMT\]\s*([0-9.]+)", response_text)
         if amt_match:
@@ -76,12 +80,17 @@ def extract_tool_call(response_text):
     except json.JSONDecodeError as e:
         raise ValueError(f"解析 JSON 失敗: {str(e)}，提取的字串為: {json_str}")
 
-    # 3. 處理包裹在 {"name": "add_record", "args": {...}} 內的情形
+    # 3. 處理包裹在 {"name": "add_record", "args": {...}} 或 {"name": "add_record", "arguments": {...}} 內的情形
     if isinstance(parsed, dict):
-        if parsed.get("name") == "add_record" and "args" in parsed:
+        if parsed.get("name") == "add_record":
+            if "args" in parsed:
+                return parsed["args"]
+            if "arguments" in parsed:
+                return parsed["arguments"]
+        if "args" in parsed:
             return parsed["args"]
-        elif "args" in parsed:
-            return parsed["args"]
+        if "arguments" in parsed:
+            return parsed["arguments"]
         return parsed
     else:
         raise ValueError("解析後的 JSON 不是物件/字典格式")
@@ -123,6 +132,11 @@ def validate_record(args, categories=None, accounts=None):
     # 5. 驗證帳戶是否在動態清單中 (選填)
     if accounts is not None and args["account"] not in accounts:
         return False, f"帳戶 '{args['account']}' 不在合法帳戶清單中"
+
+    # 6. 驗證日期格式 (選填)
+    if "date" in args and args["date"]:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(args["date"])):
+            return False, f"日期格式無效: {args['date']} (必須為 YYYY-MM-DD)"
 
     return True, ""
 

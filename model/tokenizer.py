@@ -16,6 +16,7 @@ class BookkeepingTokenizer:
             "[ACC]",   # 帳戶 (Account)
             "[DESC]",  # 備註 (Description)
             "[TYPE]",  # 收支類型 (Type: expense/income)
+            "[DATE]",  # 日期 (Date: ISO YYYY-MM-DD)
             "<tool_call>",
             "</tool_call>"
         ]
@@ -24,7 +25,7 @@ class BookkeepingTokenizer:
     def __init__(self, base_model_name_or_path: str = "jingyaogong/minimind-3"):
         """
         Args:
-            base_model_name_or_path: 基礎 MiniMind/Qwen 模型的路徑或名稱
+            base_model_name_or_path: 基礎分詞器的 HuggingFace 模型名稱或本地路徑
         """
         # 1. 載入基礎 tokenizer
         try:
@@ -76,22 +77,27 @@ class BookkeepingTokenizer:
         """
         return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
 
-    def format_compressed_record(self, amount: float, category: str, account: str, description: str, record_type: str) -> str:
+    def format_compressed_record(self, amount: float, category: str, account: str, description: str, record_type: str, date: str = None) -> str:
         """
-        將記帳資料包裝成特殊 Token 壓縮協議格式 (消融實驗核心)
+        將記帳資料包裝成特殊 Token 壓縮協議格式
+        [DATE] 放在 [TYPE] 之前，不破壞原有的 [AMT][CAT][ACC][DESC] 序列
         
         例如:
         <tool_call>[AMT]150[CAT]餐飲[ACC]信用卡[DESC]午餐[TYPE]expense</tool_call>
+        <tool_call>[AMT]150[CAT]餐飲[ACC]信用卡[DESC]午餐[DATE]2026-07-20[TYPE]expense</tool_call>
         """
+        date_part = f"[DATE]{date}" if date else ""
         return (
-            f"<tool_call>[AMT]{amount}"
+            f"<tool_call>"
+            f"[AMT]{amount}"
             f"[CAT]{category}"
             f"[ACC]{account}"
             f"[DESC]{description}"
+            f"{date_part}"
             f"[TYPE]{record_type}</tool_call>"
         )
 
-    def format_json_record(self, amount: float, category: str, account: str, description: str, record_type: str) -> str:
+    def format_json_record(self, amount: float, category: str, account: str, description: str, record_type: str, date: str = None) -> str:
         """
         將記帳資料包裝成標準 JSON 格式 (對照組)
         
@@ -105,6 +111,8 @@ class BookkeepingTokenizer:
             "description": description,
             "type": record_type
         }
+        if date:
+            record_json["date"] = date
         import json
         return f"<tool_call>{json.dumps(record_json, ensure_ascii=False)}</tool_call>"
 

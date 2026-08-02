@@ -1,0 +1,10 @@
+commit	format_pass_rate	exact_match_rate	avg_reward	avg_latency_ms	status	description
+json_baseline	99.75	66.25	3.77	756	keep	JSON baseline (Exp-1), re-run 2026-07-20
+compressed_baseline	99.50	73.50	3.79	644	keep	Compressed format (Exp-3), champion, re-run 2026-07-20
+json_label_smooth_01	99.50	65.25	3.79	700	discard	JSON + label_smoothing 0.1
+compressed_label_smooth_01	99.25	74.25	3.82	295	discard	Compressed + label_smoothing 0.1
+compressed_lr_1e4	99.25	51.00	3.62	300	discard	Compressed + LR 1e-4
+compressed_nlayers12	99.00	75.50	3.83	420	discard	Compressed + n_layers=12 (41M)
+compressed_drop02_wd02	99.25	76.50	3.81	300	discard	Compressed + dropout 0.2 + wd 0.2
+full_augmentation	99.00	69.75	3.74	670	discard	Full aug (cat+acc swap + amt)
+amount_augmentation	99.25	72.00	3.75	650	discard	Amount-only aug

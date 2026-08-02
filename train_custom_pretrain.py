@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from model.model import MiniMindLM, ModelConfig
+from model.model import BookkeepingLM, ModelConfig
 from model.tokenizer import BookkeepingTokenizer
 
 try:
@@ -17,10 +17,12 @@ except ImportError:
     HAS_WIKI_LIB = False
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="MiniMind 記帳模型從零開始的無監督預訓練 (Pre-training)")
+    parser = argparse.ArgumentParser(description="記帳模型從零開始的無監督預訓練 (Pre-training)")
     parser.add_argument("--data_path", type=str, default="./dataset/pretrain_data.txt", help="本地備用無監督預訓練文本 (.txt) 路徑")
     parser.add_argument("--use_wikipedia", action="store_true", default=True, help="是否優先透過 datasets 下載 Wikipedia 進行預訓練")
     parser.add_argument("--wiki_limit", type=int, default=3000, help="限制載入 Wikipedia 文章的筆數以控制預訓練語料規模")
+    parser.add_argument("--pretrain_jsonl", type=str, default=None, help='超大 JSONL 預訓練語料路徑 (每行 {"text": "..."})')
+    parser.add_argument("--pretrain_limit", type=int, default=50000, help="從 JSONL 語料中讀取的最大行數")
     parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="分詞器對齊路徑")
     parser.add_argument("--save_dir", type=str, default="./saves", help="預訓練模型 Checkpoint 儲存目錄")
     parser.add_argument("--epochs", type=int, default=3, help="預訓練總 Epoch 數")
@@ -41,7 +43,7 @@ class PretrainDataset(Dataset):
     2. 整合 OpenCC：對下載的維基百科簡體內容進行繁簡轉換，確保模型學習高品質的繁體中文表徵。
     3. 實作自動分塊 (Chunking)，將長文本切分為 max_seq_len 大小的訓練樣本。
     """
-    def __init__(self, file_path: str, tokenizer, max_seq_len: int = 512, use_wikipedia: bool = True, wiki_limit: int = 3000, no_ratio_limit: bool = False):
+    def __init__(self, file_path: str, tokenizer, max_seq_len: int = 512, use_wikipedia: bool = True, wiki_limit: int = 3000, no_ratio_limit: bool = False, pretrain_jsonl: str = None, pretrain_limit: int = 50000):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.chunks = []
@@ -58,7 +60,6 @@ class PretrainDataset(Dataset):
                 for article in wiki_dataset:
                     token_ids = self.tokenizer.encode(article["text"], add_special_tokens=False)
                     if token_ids:
-                        # 加上 Document Boundary (EOS Token)
                         token_ids.append(self.tokenizer.eos_token_id)
                         wiki_docs.append(token_ids)
                     count += 1
@@ -67,6 +68,29 @@ class PretrainDataset(Dataset):
                 print(f"成功載入 {count} 篇繁體 Wikipedia 文章。")
             except Exception as e:
                 print(f"警告: 線上載入 Wikipedia 失敗 ({e})，將降級。")
+
+        # 載入超大 JSONL 預訓練語料
+        if pretrain_jsonl and os.path.exists(pretrain_jsonl):
+            try:
+                import json
+                print(f"正在載入 JSONL 預訓練語料: {pretrain_jsonl} (限制 {pretrain_limit} 行)...")
+                count = 0
+                with open(pretrain_jsonl, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            text = data.get("text", "")
+                            if text.strip():
+                                token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+                                if token_ids:
+                                    token_ids.append(self.tokenizer.eos_token_id)
+                                    wiki_docs.append(token_ids)
+                            count += 1
+                            if count >= pretrain_limit:
+                                break
+                print(f"從 JSONL 載入 {count} 行文本。")
+            except Exception as e:
+                print(f"警告: 載入 JSONL 預訓練語料失敗: {e}")
 
         # 混合 30% 日常記帳口語對話語料
         conv_docs = []
@@ -83,7 +107,6 @@ class PretrainDataset(Dataset):
                                 chat_text += f"{msg['role']}: {msg['content']}\n"
                             token_ids = self.tokenizer.encode(chat_text, add_special_tokens=False)
                             if token_ids:
-                                # 加上 Document Boundary (EOS Token)
                                 token_ids.append(self.tokenizer.eos_token_id)
                                 conv_docs.append(token_ids)
                 print(f"成功混合 {len(conv_docs)} 筆口語記帳對話。")
@@ -194,7 +217,7 @@ def main():
 
     # 1. 檢測運行硬體
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("=== 啟動 MiniMind 無監督自迴歸預訓練 (From Scratch) ===")
+    print("=== 啟動記帳模型無監督自迴歸預訓練 (From Scratch) ===")
     print(f"運行裝置: {device}")
 
     # 2. 載入分詞器
@@ -206,7 +229,7 @@ def main():
         max_seq_len=args.max_seq_len
     )
     # 不加載任何 pre-trained 權重
-    model = MiniMindLM(config).to(device)
+    model = BookkeepingLM(config).to(device)
     from model.model import count_parameters
     total_params = count_parameters(model)
     print(f"模型隨機初始化成功。詞表大小: {config.vocab_size}，層數: {config.n_layers}，參數量: {total_params / 1e6:.2f}M")
@@ -217,7 +240,9 @@ def main():
         max_seq_len=args.max_seq_len,
         use_wikipedia=args.use_wikipedia,
         wiki_limit=args.wiki_limit,
-        no_ratio_limit=args.no_ratio_limit
+        no_ratio_limit=args.no_ratio_limit,
+        pretrain_jsonl=args.pretrain_jsonl,
+        pretrain_limit=args.pretrain_limit
     )
     if len(dataset) == 0:
         print("錯誤: 預訓練資料太少，無法切分出合規訓練區塊，訓練終止。")

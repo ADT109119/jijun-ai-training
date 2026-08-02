@@ -7,19 +7,16 @@ from typing import Optional, Tuple
 
 @dataclass
 class ModelConfig:
-    """
-    模型超參數配置類別
-    """
-    vocab_size: int = 6400      # 詞彙表大小 (將依自訂 Tokenizer 擴充)
-    d_model: int = 512          # 隱藏層維度 (d_model)
-    n_layers: int = 8           # Transformer 堆疊層數
-    n_heads: int = 8            # Query 注意力頭數
-    n_kv_heads: int = 4         # Key/Value 注意力頭數 (GQA: 頭數比為 2:1)
-    multiple_of: int = 32       # SwiGLU 中間維度對齊基數
-    norm_eps: float = 1e-5      # RMSNorm 的穩定常數 epsilon
-    max_seq_len: int = 512      # 最大序列長度
-    hidden_dim: Optional[int] = 1536 # SwiGLU 中間層維度 (預設為 1536 以對齊學術規劃，為 None 時公式自適應)
-    dropout: float = 0.1     # Dropout 比率 (防止過擬合)
+    vocab_size: int = 6400
+    d_model: int = 768
+    n_layers: int = 12
+    n_heads: int = 8
+    n_kv_heads: int = 4
+    multiple_of: int = 32
+    norm_eps: float = 1e-5
+    max_seq_len: int = 1024
+    hidden_dim: Optional[int] = 1152
+    dropout: float = 0.1
 
 class RMSNorm(nn.Module):
     """
@@ -203,9 +200,9 @@ class TransformerBlock(nn.Module):
         out = h + self.dropout(self.feed_forward(self.ffn_norm(h)))
         return out
 
-class MiniMindLM(nn.Module):
+class BookkeepingLM(nn.Module):
     """
-    主模型類別: MiniMindLM
+    主模型類別: BookkeepingLM
     實現了包含 Tied Embedding 詞表與層疊 Transformer 塊的完整自迴歸生成網路。
     """
     def __init__(self, config: ModelConfig):

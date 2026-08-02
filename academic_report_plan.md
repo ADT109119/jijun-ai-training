@@ -1,5 +1,7 @@
 # 學術研究與研究所推甄作品集規劃書 (Academic Portfolio Blueprint)
 
+> **⚠️ 規劃文件**：本文件為初期規劃藍圖（30M 研究規格）。當前實際模型已升級為 **58M**（12 層 / d_model=768 / vocab=6406），規格以 `README.md` 最新現況為準。
+
 本規劃書彙整了技術路線，旨在為您的子模組專案建立一個**高辨識度、結構嚴謹、具備學術論文厚度**的推甄代表作。
 
 ---
@@ -20,7 +22,7 @@
 * **Transformer Layers**：`8`
 * **SwiGLU 中間維度**：`1536`
 * **最大序列長度 (Max Sequence Length)**：`512`
-* **詞表 (Tokenizer)**：以 MiniMind/Qwen 的 6,400 詞表為基礎，**註冊專用特殊 Token** (`[AMT]`, `[CAT]`, `[ACC]`, `[DESC]`, `[TYPE]`)。
+* **詞表 (Tokenizer)**：以相容 Llama 結構的 6,400 詞表為基礎，**註冊專用特殊 Token** (`[AMT]`, `[CAT]`, `[ACC]`, `[DESC]`, `[TYPE]`)。
 * **Tied Embedding**：輸入 Embedding 與輸出 LM Head 權重綁定，節省約 35% 參數量並加快收斂。
 
 ---
@@ -60,7 +62,7 @@
 ---
 
 ## 5. 評測基準與指標 (Benchmark & Ablation)
-評測腳本 [evaluate_benchmark.py](file:///c:/Users/me/OneDrive/桌面/HTML/輕鬆記帳/tools/jijun-ai-training/evaluate_benchmark.py) 將量化評估以下指標：
+評測腳本 `evaluate_benchmark.py` 將量化評估以下指標：
 
 1. **Token 壓縮與推理效率 (Inference Efficiency)**：
    * **Token 節省率 (%)**：對比 JSON 協定所節省的 Token 比例。

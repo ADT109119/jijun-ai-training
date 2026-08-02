@@ -3,14 +3,14 @@ import json
 import argparse
 import time
 import torch
-from model.model import MiniMindLM, ModelConfig
+from model.model import BookkeepingLM, ModelConfig
 from model.tokenizer import BookkeepingTokenizer
 from trainer.validate_json import extract_tool_call, validate_record, calculate_reward
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="MiniMind 記帳 Tool-calling 量化評測基準 (Benchmark)")
-    parser.add_argument("--model_path", type=str, required=True, help="微調後的 PyTorch 模型權重路徑")
-    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="基礎 model/tokenizer 路徑")
+    parser = argparse.ArgumentParser(description="記帳模型 Tool-calling 量化評測基準 (Benchmark)")
+    parser.add_argument("--model_path", type=str, required=True, help="訓練完成的 PyTorch 模型權重路徑")
+    parser.add_argument("--base_model", type=str, default="jingyaogong/minimind-3", help="分詞器基礎模型名稱或路徑")
     parser.add_argument("--dataset", type=str, required=True, help="分層測試數據集 (.jsonl) 路徑")
     return parser.parse_args()
 
@@ -60,7 +60,7 @@ def load_stratified_dataset(dataset_path):
     return dataset
 
 def run_evaluation(model_path, base_model, dataset_path):
-    print("=== 啟動 MiniMind 離線記帳小模型量化評測 ===")
+    print("=== 啟動記帳模型量化評測 ===")
     print(f"模型權重: {model_path}")
     print(f"測試數據: {dataset_path}")
     
@@ -77,7 +77,7 @@ def run_evaluation(model_path, base_model, dataset_path):
     if model_path != "dummy" and os.path.exists(model_path):
         try:
             config = ModelConfig(vocab_size=tokenizer.vocab_size)
-            model = MiniMindLM(config)
+            model = BookkeepingLM(config)
             model.load_state_dict(torch.load(model_path, map_location=device))
             model.to(device)
             model.eval()
@@ -110,6 +110,7 @@ def run_evaluation(model_path, base_model, dataset_path):
                 "amount_correct": 0,
                 "category_correct": 0,
                 "account_correct": 0,
+                "date_correct": 0,
                 "reward_sum": 0.0,
                 "latency_sum": 0.0
             }
@@ -181,12 +182,16 @@ def run_evaluation(model_path, base_model, dataset_path):
                 # 比對帳戶
                 if pred_args.get("account") == label_args.get("account"):
                     diff_stats["account_correct"] += 1
+                # 比對日期
+                if pred_args.get("date") == label_args.get("date"):
+                    diff_stats["date_correct"] += 1
                     
                 # 是否完全一致
                 if (abs(float(pred_args.get("amount", 0)) - float(label_args.get("amount", 0))) < 1e-4 and
                     pred_args.get("category") == label_args.get("category") and
                     pred_args.get("account") == label_args.get("account") and
-                    pred_args.get("type") == label_args.get("type")):
+                    pred_args.get("type") == label_args.get("type") and
+                    pred_args.get("date") == label_args.get("date")):
                     diff_stats["exact_match"] += 1
         except ValueError:
             pass # 格式毀損，各欄位皆算失敗
@@ -222,6 +227,7 @@ def run_evaluation(model_path, base_model, dataset_path):
         print(f"  - 金額正確率: {(data['amount_correct'] / total * 100):.2f}%")
         print(f"  - 分類正確率: {(data['category_correct'] / total * 100):.2f}%")
         print(f"  - 帳戶正確率: {(data['account_correct'] / total * 100):.2f}%")
+        print(f"  - 日期正確率: {(data['date_correct'] / total * 100):.2f}%")
         print(f"  - 平均 RL Reward 分數: {avg_reward:.2f} / 4.0")
         print(f"  - 平均推論延遲: {avg_latency:.2f} ms")
         print("-" * 60)
@@ -243,22 +249,25 @@ if __name__ == "__main__":
             {
                 "difficulty_level": "Level-1 (Simple)",
                 "messages": [
+                    {"role": "system", "content": "今天是 2026-07-20。你是一個記帳助理。"},
                     {"role": "user", "content": "吃麥當勞花了 150 元，付現金"},
-                    {"role": "assistant", "content": '<tool_call>{"amount": 150, "category": "餐飲", "account": "現金", "description": "麥當勞", "type": "expense"}</tool_call>'}
+                    {"role": "assistant", "content": '<tool_call>{"amount": 150, "category": "餐飲", "account": "現金", "description": "麥當勞", "type": "expense", "date": "2026-07-20"}</tool_call>'}
                 ]
             },
             {
                 "difficulty_level": "Level-2 (Noise)",
                 "messages": [
+                    {"role": "system", "content": "今天是 2026-07-20。你是一個記帳助理。"},
                     {"role": "user", "content": "今天下雨搭計程車回家，花了 250 元，刷悠遊卡"},
-                    {"role": "assistant", "content": '<tool_call>{"amount": 250, "category": "交通", "account": "悠遊卡", "description": "計程車", "type": "expense"}</tool_call>'}
+                    {"role": "assistant", "content": '<tool_call>{"amount": 250, "category": "交通", "account": "悠遊卡", "description": "計程車", "type": "expense", "date": "2026-07-20"}</tool_call>'}
                 ]
             },
             {
                 "difficulty_level": "Level-3 (Reasoning)",
                 "messages": [
+                    {"role": "system", "content": "今天是 2026-07-20。你是一個記帳助理。"},
                     {"role": "user", "content": "昨天領了上個月的家教薪水 5000 元，存入銀行帳戶"},
-                    {"role": "assistant", "content": '<tool_call>{"amount": 5000, "category": "薪水", "account": "銀行帳戶", "description": "家教", "type": "income"}</tool_call>'}
+                    {"role": "assistant", "content": '<tool_call>{"amount": 5000, "category": "薪水", "account": "銀行帳戶", "description": "家教", "type": "income", "date": "2026-07-19"}</tool_call>'}
                 ]
             }
         ]

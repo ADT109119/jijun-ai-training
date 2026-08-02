@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+hf_upload
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
@@ -149,6 +150,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -218,14 +221,22 @@ __marimo__/
 .streamlit/secrets.toml
 
 # =========================================================================
-# ToolMind Custom Ignored Files
+# jijun-LM Custom Ignored Files
 # =========================================================================
 # Datasets (Generated dataset files and folders)
-dataset/raw_generated.jsonl
+dataset/raw_generated*.jsonl
 dataset/train_strata.jsonl
 dataset/test_strata.jsonl
 dataset/test_dataset.jsonl
+dataset/train_augmented*.jsonl
 dataset_10/
+
+# Debug & Temp Files
+debug_*
+tempCodeRunnerFile.py
+
+# Planning / Internal Docs (not for public)
+program.md
 
 # Checkpoints & Model Saves (PyTorch weights, huge files)
 saves/
