@@ -344,49 +344,155 @@ EXTRA_CATEGORIES_POOL = [
     # （重複已存在的在生成時不會有影響，因為我們用 random.sample 從 pool 中取）
 ]
 
-# 新增隨機情境池，打破 LLM 單一邏輯複製，增強數據分佈多樣性
+# 新增隨機情境池，打破 LLM 單一邏輯複製，增強數據分佈多樣性（涵蓋 80+ 種全方位生活與理財情境）
 SCENARIOS = [
-    "上班族午餐吃便當或商業午餐，或買咖啡飲料",
-    "晚餐去餐廳吃飯或叫外送",
-    "早餐在早餐店買三明治飲料",
-    "去超市或便利商店買日常用品、零食飲料",
-    "繳水電費、瓦斯費、管理費或停車費",
-    "搭捷運、公車或計程車通勤",
-    "騎機車加油或搭高鐵出差",
-    "看電影、去遊樂園或買遊戲",
-    "去診所看醫生或去藥局買藥",
-    "掛號費、健檢費用或買保健食品",
-    "買書、報名課程或繳學費",
-    "參加研討會或買線上課程",
-    "幫朋友代墊費用後對方還錢",
-    "收到朋友還款或退款",
-    "收到兼職收入或打工薪水",
-    "買衣服、鞋子或網購日常用品",
-    "買寵物用品或幫寵物看醫生",
-    "繳保險費或繳房租房貸",
-    "買家電、家具或修繕房屋",
-    "收到股利、利息或賣二手物品收入",
-    "領到這個月的薪水或年終獎金",
-    "爸媽給的零用錢或生活費",
-    "兼差接案或打工賺的外快",
-    "股票配息或銀行利息收入",
-    "朋友還之前借的錢或欠款回收"
+    # === 飲食與餐飲 ===
+    "上班族午餐吃便當、排骨飯、牛肉麵或商業午餐，買手搖杯飲料",
+    "晚餐去熱炒店、火鍋店、燒肉店或日式居酒屋聚餐吃飯",
+    "早餐在傳統美而美早餐店買蛋餅、三明治、大冰奶",
+    "去星巴克、路易莎或獨立咖啡廳點手沖咖啡與肉桂捲工作",
+    "下午叫 Uber Eats 或 Foodpanda 點炸雞手搖外送，含外送費與小費",
+    "宵夜在路邊攤買鹽酥雞、滷味、東山鴨頭或永和豆漿",
+    "在夜市吃蚵仔煎、地瓜球、大腸包小腸，現金付款",
+    "家庭聚餐在連鎖吃到飽 Buffet（如饗食天堂、旭集、欣葉）刷卡結帳",
+    "買麵包店新鮮出爐的生吐司、可頌、法棍當隔天早餐",
+    "在拉麵店用自助點餐機點特濃叉燒拉麵加糖心蛋",
+    "夏日去冰品店吃芒果雪花冰、傳統黑糖刨冰或豆花",
+    "在速食店（麥當勞、肯德基、摩斯漢堡、漢堡王）買套餐",
+
+    # === 日常生活與超市採購 ===
+    "去全聯福利中心大採購，買雞蛋、鮮奶、生鮮蔬菜、肉品與洗碗精",
+    "去好市多 Costco 採購牛肉、烤雞、大包裝衛生紙與洗衣膠囊",
+    "去家樂福或大潤發買居家生活雜貨、五金修繕工具與收納箱",
+    "在 7-11 或全家便利商店買御飯糰、無糖綠茶並寄取蝦皮包裹",
+    "在屈臣氏或康是美買洗面乳、洗髮精、牙膏、防曬乳與面膜",
+    "在傳統早市菜市場跟菜販、肉販買菜、買溫體豬肉與水果",
+    "在美廉社買特價雞蛋、啤酒與零食餅乾",
+    "網購（蝦皮購物、momo、PChome、Coupang酷澎）下單日用品取貨付款",
+    "去特力屋買燈泡、層架、水龍頭零件進行居家 DIY 修繕",
+    "買大包抽取式衛生紙、廚房紙巾與垃圾袋等民生消耗品",
+
+    # === 交通出行與通勤 ===
+    "搭台北/高雄/台中捷運或輕軌通勤，悠遊卡/一卡通自動扣款",
+    "搭乘市區公車或跨縣市國道客運（國光、統聯）回老家",
+    "騎機車去中油直營店加油，加 95 無鉛汽油加滿",
+    "開車去加油站加油，順便加購洗車服務",
+    "在市區路邊公有停車格或地下停車場停半天，繳交停車費",
+    "國道高速公路 eTag / ETC 通行費自動扣款儲值",
+    "叫計程車（Uber、台灣大車隊 55688、LINE GO）趕時間出差",
+    "租借共享汽機車（iRent、GoShare、WeMo）市區短途代步",
+    "訂購台鐵自強號/太魯閣號火車票返鄉",
+    "購買台灣高鐵對號座/商務座車票去南部出差或旅遊",
+    "機車定期換機油、齒輪油、空濾與煞車皮保養",
+    "汽車進廠定期大保養、換輪胎或定期驗車規費",
+    "去機車行補胎、換電瓶或修理火星塞",
+
+    # === 休閒娛樂與興趣社交 ===
+    "去威秀或國賓影城看 IMAX 院線大片，買雙人爆米花可樂套票",
+    "每個月訂閱串流影音（Netflix、Disney+、YouTube Premium、Spotify）自動扣款",
+    "在 Steam 購買特價 3A 遊戲大作、獨立遊戲或 DLC 擴充包",
+    "在 Nintendo eShop 或 PlayStation Store 購買數位版遊戲",
+    "手機遊戲課金抽卡、購買月卡或通行證",
+    "跟朋友去錢櫃、好樂迪或享溫馨 KTV 唱歌聚會，分攤包廂與餐飲費",
+    "週末跟朋友去酒吧小酌點調酒、精釀啤酒與下酒菜",
+    "搶票看熱門歌手演唱會、音樂祭或舞台劇門票",
+    "參觀美術館特展、動漫展覽、文創市集購買手作文創商品",
+    "週末去露營區露營，支付營地費與租借帳篷睡袋裝備",
+    "去遊樂園（六福村、麗寶樂園、劍湖山）玩，買門票與園區餐飲",
+    "跟朋友在桌遊店包廂玩桌遊、打密室逃脫遊戲",
+    "去運動中心打羽毛球、游泳或保齡球館租球道",
+    "買模型公仔、盲盒、樂高玩具或動漫周邊收藏品",
+
+    # === 醫療保健與個人護理 ===
+    "去耳鼻喉科或家醫科診所看感冒，支付健保掛號費與藥品自費額",
+    "去牙醫診所洗牙、補牙或做根管治療、牙齒美白自費項目",
+    "在中醫診所針灸、推拿整復並拿自費中藥水藥",
+    "去眼科檢查視力、眼壓並拿眼藥水",
+    "去皮膚科診所看過敏、痘痘並購買專用藥膏或做醫美微整",
+    "在大樹藥局或丁丁藥局買綜合維他命、魚油、葉黃素與益生菌",
+    "去眼鏡行配新眼鏡、配抗藍光鏡片或買拋棄式隱形眼鏡藥水",
+    "在醫院做自費健康檢查、無痛腸胃鏡或電腦斷層掃描",
+    "去復健科做物理治療、電療、熱敷與拉脖子復健",
+    "在美髮沙龍剪髮、洗髮、染髮或燙髮造型設計",
+    "預約做臉清粉刺、美甲光療或全身精油 SPA 按摩放鬆",
+    "繳交健身房（World Gym、健身工廠）月費或購買一對一教練課",
+
+    # === 居家水電、房租與稅費 ===
+    "轉帳支付這個月的租屋房租給房東",
+    "銀行帳戶自動扣繳房屋貸款本金與利息",
+    "繳納社區大樓每月管理費、汽車停車位清潔費",
+    "收到台電電費帳單（夏季冷氣用電高峰）透過行動支付繳費",
+    "繳納台灣自來水公司水費與欣欣天然瓦斯費帳單",
+    "繳納中華電信光世代寬頻光纖上網與 MOD 電視收視費",
+    "繳納手機門號 5G 上網吃到飽每月通訊費帳單",
+    "繳納每年汽機車牌照稅、燃料使用費或房屋稅、地價稅",
+    "申報綜合所得稅透過信用卡或銀行帳戶扣款繳稅",
+    "找水電師傅到府維修水管漏水、更換抽水馬達或插座",
+    "冷氣機清洗保養防霉處理、請清潔公司到府居家大掃除",
+    "找鎖匠開鎖、重配大門防盜門鎖與感應磁扣",
+
+    # === 教育學習與專業成長 ===
+    "繳納大學、研究所學雜費或中小學註冊費與營養午餐費",
+    "報名駕訓班考取汽車駕照或大型重機駕照學費",
+    "在誠品書店或博客來購買專業技術書籍、暢銷小說與雜誌",
+    "在線上學習平台（Hahow、Udemy、PressPlay）購買職場技能課程",
+    "報名語言檢定考試（TOEIC 多益、日語 JLPT、托福）報名費",
+    "報名專業證照考試（AWS 雲端認證、PMP 專案管理、不動產經紀人）",
+    "參加產業年度研討會、商業交流高峰會或技術工作坊門票",
+    "支付小孩安親班、課後輔導或個別家教鐘點費用",
+    "購買文具、筆記本、專業繪圖工具或簡報遙控器",
+
+    # === 寵物照顧與其他支出 ===
+    "去寵物店買貓砂、無穀貓狗飼料、罐頭凍乾肉泥零食",
+    "帶毛小孩去動物醫院打年度疫苗、體內外驅蟲或看診",
+    "送狗狗去寵物美容洗澡、剪毛、修指甲與清耳朵",
+    "出遠門將寵物寄宿在寵物旅館或請到府照顧保母",
+    "朋友結婚包婚宴喜酒紅包禮金",
+    "長輩過壽、過年包給父母長輩或晚輩壓歲錢紅包",
+    "親友長輩喪事致贈奠儀白包",
+    "每個月定期定額捐款給流浪動物之家或慈善公益團體",
+    "繳納每年汽機車強制險、第三人責任險或個人醫療壽險保費",
+    "不小心違規停車、紅燈右轉收到交通違規罰單繳納罰款",
+
+    # === 多元收入與理財回饋 ===
+    "公司發放每月份固定薪資轉帳入帳",
+    "農曆年前領到公司發放的豐厚年終獎金與紅包",
+    "端午節/中秋節收到公司發放的三節禮金與開工紅包",
+    "季度業績達標收到高額業務業績獎金或專案分紅",
+    "自由職業者接案完成 UI 設計、網頁開發收到專案尾款",
+    "受邀前往大專院校或企業演講收到講師鐘點費",
+    "投稿專欄文章或出版書籍收到出版社稿費與版稅收入",
+    "週末兼職打工、外送跑單辛苦賺取的外快現金與時薪",
+    "股票發放年度現金股利、ETF（0056/00878/00929）每月配息入帳",
+    "高利活存數位銀行（Richart、大戶、將來銀行）每月利息入帳",
+    "在蝦皮或旋轉拍賣賣掉二手舊手機、舊相機或退坑動漫周邊入帳",
+    "統一發票中獎（六獎、五獎或雲端專屬獎）超商兌換現金或入帳",
+    "購買台灣彩券大樂透、威力彩或春節刮刮樂刮中獎金",
+    "幫同事、朋友代墊聚餐聚會費用，對方透過 LINE Pay/街口轉帳還款",
+    "之前借給親友的款項，對方準時歸還欠款本金與利息",
+    "政府發放育兒津貼、生育獎勵金、租屋補助或節能家電退稅入帳"
 ]
 
 # 新增口語化風格池，確保對話句式與長度分佈豐富
 LANG_STYLES = [
     "極簡短句，甚至省略主詞或動詞（例：『午餐吃麵 120 現金』）",
+    "純品項與金額的超短片語（例：『麥當勞99元』、『咖啡65刷卡』、『全聯鮮乳85』）",
     "囉唆、帶有許多心情故事與情境碎碎念的長句（例：『今天下大雨真煩，下班忍不住去全聯大買特買零食，不知不覺花了我五百多塊，刷了信用卡，心在痛』）",
-    "倒裝句或順序混亂的表達（例：『刷了 LINE Pay 買星巴克，花了 160 塊今天早上』）",
+    "倒裝句或順序混亂的口語表達（例：『刷了 LINE Pay 買星巴克，花了 160 塊今天早上』）",
     "包含數字或貨幣口語的寫法（例：『去屈臣氏買個洗面乳，花了一張藍色小朋友，找回的零錢用悠遊卡嗶了』）",
-    "台灣在地日常用語與語助詞（例：『哇賽，剛剛去美聯社買牛奶，用悠遊卡扣了 90 塊耶』）",
-    "帶有明確日期指代（例：『上禮拜三去健身房扣款 1200，刷了台新卡』或『昨天領了外包薪水 3 萬存入銀行』）",
-    "包含部分英文術語或簡寫的夾雜口語（例：『買了 Udemy 課程花了 50 USD，刷 Visa 卡』）",
-    "帶有大量重複贅詞的口語（例：『阿那個就是…就是…那個午餐的錢啦，好像大概150元吧』）",
-    "中英夾雜的科技業用語（例：『今天下午team building去吃了個buffet，我直接用Apple Pay刷了大概890』）",
-    "用社群語氣與網路用語（例：『今天掛號費650尻了一筆醫藥費，現金結帳』）",
-    "帶有長輩口吻的老派說法（例：『今兒個去市場買了點兒菜，花了二百五，給的是現金』）",
-    "用疑問或反問形式記帳（例：『我昨天是不是刷了信用卡買書？好像是400多塊？』）"
+    "台灣在地日常用語與豐富語助詞（例：『哇賽，剛剛去美廉社買牛奶，用悠遊卡扣了 90 塊耶，超划算的啦』）",
+    "帶有明確相對日期指代（例：『上禮拜三去健身房扣款 1200，刷了台新卡』或『前天領了外包薪水 3 萬存入銀行』）",
+    "中英夾雜的科技業或外企白領用語（例：『今天下午 team building 去吃了個 buffet，我直接用 Apple Pay 刷了大概 890』）",
+    "帶有大量重複贅詞、口吃與猶豫的口語（例：『阿那個就是…就是…那個午餐的錢啦，好像大概150元吧，付現金啦』）",
+    "用社群網路語氣與鄉民用語（例：『今天掛號費650噴了一筆醫藥費，錢包大失血，現金結帳』）",
+    "帶有長輩口吻的老派說法（例：『今兒個去市場買了點兒青菜，花了二百五，給的是現金』）",
+    "用疑問或反問形式記帳（例：『我昨天是不是刷了信用卡買書？好像是400多塊？』）",
+    "包含多品項算術與優惠折扣計算的複合句（例：『買了兩杯大冰拿一杯70第二杯半價，加一個45塊三明治，付現金』）",
+    "代墊分帳與湊整情境（例：『中午跟同事吃泰式總共1200四個人平分，我先刷國泰卡，大家待會轉給我』）",
+    "抱怨物價上漲的心情記帳（例：『天啊現在便當一個居然要130了，買了雞腿便當付現，好貴』）",
+    "開心的慶祝或犒賞自己的口吻（例：『今天專案終於結案了！晚上吃牛排好好犒賞自己花了980，刷富邦卡』）",
+    "隨性簡短但包含折扣的記帳（例：『全家咖啡買一送一總共65元，用悠遊卡付』）",
+    "生活隨筆式的記帳（例：『機車輪胎磨平了換新輪胎一千二，付現金給車行老闆』）"
 ]
 
 # 系統 Prompt 與 Tools 定義，用於教導大模型如何生成樣本
@@ -435,7 +541,7 @@ GENERATOR_SYSTEM_PROMPT = """
 7. 禁止使用任何 emoji 或顏文字（如 ☁️、😊、QQ 等），僅使用純文字。
 """
 
-async def generate_single_sample(client, model_name, difficulty, categories, accounts, ref_date, recent_history=None, thinking_budget=0, bias_categories=None):
+async def generate_single_sample(client, model_name, difficulty, categories, accounts, ref_date, recent_history=None, thinking_budget=0, bias_categories=None, is_ultra_short=False):
     """
     發送非同步請求至 OpenAI/LLM API 生成單筆樣本，包含自動自我修正 (Self-Correction) 迴圈與後置代碼排重
     """
@@ -490,6 +596,22 @@ async def generate_single_sample(client, model_name, difficulty, categories, acc
     expected_type = "income" if is_income else "expense"
 
     newline = chr(10)
+    short_instruction = ""
+    if is_ultra_short:
+        short_instruction = (
+            f"【強烈特殊要求：極簡短句/片語風格 (Ultra-Short Phrase)】{newline}"
+            f"- user 的 content 必須極為簡短（絕對控制在 2~10 個字以內），不寫任何完整句子。{newline}"
+            f"- 必須使用類似以下的片語格式：{newline}"
+            f"  * 『午餐 99』{newline}"
+            f"  * 『麥當勞99元』{newline}"
+            f"  * 『午餐，麥當勞99元』{newline}"
+            f"  * 『捷運 35』{newline}"
+            f"  * 『咖啡65刷卡』{newline}"
+            f"  * 『全聯牛奶85元』{newline}"
+            f"- 當 user 輸入未提及支付管道時，account 欄位請預設為 '現金'。{newline}"
+            f"- 當 user 輸入未提及日期時，date 欄位請務必輸出基準日期 '{ref_date_str}'。{newline}"
+        )
+
     prompt = (
         f"請生成 1 筆包含 <tool_call> 的對話樣本。{newline}"
         f"難度等級: {difficulty}{newline}"
@@ -498,8 +620,9 @@ async def generate_single_sample(client, model_name, difficulty, categories, acc
         f"參考日期 (今天): {ref_date_str}{newline}"
         f"請確保對話涉及的分類為 '{target_category}'，帳戶為 '{target_account}'。{newline}"
         f"請注意，分類 '{target_category}' 應使用 type='{expected_type}'，切勿混用。{newline}"
+        f"{short_instruction}"
         f"【多樣性要求】{newline}"
-        f"1. 必須圍繞以下情境展開故事：{scenario}{newline}"
+        f"1. 圍繞以下情境展開故事：{scenario}{newline}"
         f"2. 口語風格限制：{lang_style}{newline}{newline}"
         f"【輸出格式要求】{newline}"
         f"- 請輸出一個 JSON 物件，包含 difficulty_level 和 messages 兩個欄位。{newline}"
@@ -611,6 +734,29 @@ async def generate_single_sample(client, model_name, difficulty, categories, acc
                     is_valid = False
                     err_msg = f"分類 '{cat}' 不適用於 type=expense"
 
+            # 3.6 當 user 訊息未明確提及任何支付媒介/帳戶時，強制將 account 修正為「現金」
+            if is_valid:
+                user_txt = ""
+                for m in messages:
+                    if m.get("role") == "user":
+                        user_txt = m.get("content", "")
+                ac_kw = [
+                    '現金', '付現', '信用卡', '刷卡', '卡', '悠遊卡', '一卡通', 'icash', '悠遊付',
+                    '街口', 'LINE Pay', 'Apple Pay', 'Google Pay', 'Samsung Pay', '台灣Pay', '全支付',
+                    '全盈', 'OPEN錢包', 'Pi錢包', '橘子支付', '歐付寶', '郵局', '銀行', '存款', '帳戶',
+                    '外幣', '加密貨幣', 'Richart', 'LINE Bank', '將來銀行', '樂天', 'O-Bank',
+                    '轉帳', '匯款', '扣款', '提款', '交割戶', '複委託', '美元', '日圓', '台新', '國泰',
+                    '富邦', '中信', '玉山', '永豐', '聯邦', '元大', '星展', '滙豐', '兆豐', '第一', '華南',
+                    '彰化', '合庫', '渣打', '大戶', 'iLeo', 'KOKO', 'SnY'
+                ]
+                has_ac_kw = any(kw in user_txt for kw in ac_kw)
+                if not has_ac_kw and args.get("account") != "現金":
+                    args["account"] = "現金"
+                    # 更新 assistant 訊息內的 content
+                    for m in messages:
+                        if m.get("role") == "assistant":
+                            m["content"] = f'<tool_call>{{"name": "add_record", "args": {json.dumps(args, ensure_ascii=False)}}}</tool_call>'
+
             # 4. 檢查內容是否與歷史已生成語料重複
             if is_valid and recent_history:
                 user_text = ""
@@ -665,7 +811,7 @@ async def generate_single_sample(client, model_name, difficulty, categories, acc
             
     return None
 
-async def generate_dataset(api_url, api_key, model_name, num_samples, out_dir, concurrency=2, rest_interval=0, rest_duration=1, thinking_budget=0, bias_categories=None):
+async def generate_dataset(api_url, api_key, model_name, num_samples, out_dir, concurrency=2, rest_interval=0, rest_duration=1, thinking_budget=0, bias_categories=None, short_ratio=0.25):
     os.makedirs(out_dir, exist_ok=True)
     raw_path = os.path.join(out_dir, "raw_generated.jsonl")
     
@@ -758,11 +904,12 @@ async def generate_dataset(api_url, api_key, model_name, num_samples, out_dir, c
                 # 每個 task 發起前增加微小的時間抖動，避免同時打擊 API
                 await asyncio.sleep(random.uniform(0.1, 0.5))
                 ref_date = date(2026, 1, 1) + timedelta(days=random.randint(0, 364))
+                is_ultra_short = (random.random() < short_ratio)
                 
                 sample = await generate_single_sample(
                     client, model_name, difficulty, CATEGORIES, ACCOUNTS, ref_date,
                     recent_history=history_user_texts, thinking_budget=thinking_budget,
-                    bias_categories=bias_categories
+                    bias_categories=bias_categories, is_ultra_short=is_ultra_short
                 )
                 if sample:
                     all_samples.append(sample)
@@ -815,6 +962,7 @@ def main():
     parser.add_argument("--rest_duration", type=float, default=float(os.environ.get("REST_DURATION", 1)), help="每次休息的分鐘數 (預設 1，可設於 .env 的 REST_DURATION)")
     parser.add_argument("--thinking_budget", type=int, default=0, help="Qwen 推理模型的 thinking_budget (0 = 關閉 thinking，預設 0)")
     parser.add_argument("--bias_categories", type=str, default="", help="逗號分隔的類別清單，70% 機率偏向這些類別生成 (預設空 = 不偏)")
+    parser.add_argument("--short_ratio", type=float, default=0.25, help="極簡短描述 (Ultra-Short) 生成比例 (預設 0.25 = 25%%)")
     
     args = parser.parse_args()
     
@@ -845,7 +993,8 @@ def main():
         args.rest_interval,
         args.rest_duration,
         args.thinking_budget,
-        [c.strip() for c in args.bias_categories.split(",") if c.strip()] if args.bias_categories else None
+        [c.strip() for c in args.bias_categories.split(",") if c.strip()] if args.bias_categories else None,
+        args.short_ratio
     ))
 
 if __name__ == "__main__":
