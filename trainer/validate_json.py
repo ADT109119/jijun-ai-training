@@ -1,5 +1,29 @@
 import re
 import json
+import os
+
+# Protocol v2：schema 路徑（與 gen/build_prompt.py 共用同一真相源）
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools.schema.json")
+_schema_cache = None
+
+
+def load_tools_schema(path=None):
+    """載入 tools.schema.json（單一真相源），帶快取。"""
+    global _schema_cache
+    if path is None and _schema_cache is not None:
+        return _schema_cache
+    with open(path or SCHEMA_PATH, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+    if path is None:
+        _schema_cache = schema
+    return schema
+
+
+def get_tool_definition(schema, name):
+    for tool in schema["tools"]:
+        if tool["name"] == name:
+            return tool
+    raise KeyError(f"未知 tool: {name} (schema 定義: {[t['name'] for t in schema['tools']]})")
 
 def extract_tool_call(response_text):
     """
@@ -94,6 +118,254 @@ def extract_tool_call(response_text):
         return parsed
     else:
         raise ValueError("解析後的 JSON 不是物件/字典格式")
+
+
+# ---------------------------------------------------------------------------
+# Protocol v2：多 tool call 解析 + schema 驅動驗證（對齊前端 toolsSchema.js）
+# ---------------------------------------------------------------------------
+
+_TOOL_CALL_RE = re.compile(r"<tool_call>([\s\S]*?)</tool_call>")
+
+
+def extract_tool_calls(response_text):
+    """
+    Protocol v2：從模型輸出中提取 1..N 個 tool call。
+
+    對齊前端 aiService.parseToolCalls：
+    - 先剔除  思考鏈標籤
+    - 壓縮軌（[AMT]/[CAT]）= 單一 add_record（研究用）
+    - JSON 軌：全域匹配所有 <tool_call> block；無 tag 時 fallback 第一個 balanced JSON 物件
+    - bare-args（無 name envelope）容錯為 add_record
+
+    Returns:
+        list[dict]: 每项 {"name": str|None, "args": dict|None,
+                         "error": str|None}（error 非 None = 該 block 解析失敗）
+    """
+    if not response_text:
+        raise ValueError("模型輸出為空")
+    response_text = re.sub(r"<think>[\s\S]*?</think>", "", response_text).strip()
+
+    # 1. 壓縮軌（研究用，僅 add_record 單 call）
+    if "[AMT]" in response_text or "[CAT]" in response_text:
+        try:
+            args = extract_tool_call(response_text)
+            return [{"name": "add_record", "args": args, "error": None}]
+        except ValueError as e:
+            return [{"name": "add_record", "args": None, "error": str(e)}]
+
+    calls = []
+    # 2. JSON 軌：全域匹配
+    for m in _TOOL_CALL_RE.finditer(response_text):
+        calls.append(_resolve_call_json(m.group(1).strip()))
+    if calls:
+        return calls
+
+    # 3. 無 tag fallback：第一個 balanced JSON 物件
+    json_str = _extract_balanced_json(response_text)
+    if json_str:
+        calls.append(_resolve_call_json(json_str))
+    if calls:
+        return calls
+
+    raise ValueError("無法從 AI 輸出中提取 Tool Call JSON")
+
+
+def _extract_balanced_json(text):
+    """從文字中找出第一座 balanced JSON 物件（含巢狀大括號，字串內大括號不計）。"""
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _resolve_call_json(json_str):
+    """把一個 JSON 字串解析成 {"name", "args", "error"}。"""
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        return {"name": None, "args": None, "error": f"解析 JSON 失敗: {e}"}
+    if not isinstance(parsed, dict):
+        return {"name": None, "args": None, "error": "tool call 不是物件"}
+    name = parsed.get("name")
+    args = parsed.get("args", parsed.get("arguments"))
+    if name is None:
+        # bare-args 容錯 → add_record（對齊前端決策）
+        if isinstance(args, dict):
+            return {"name": "add_record", "args": args, "error": None}
+        return {"name": "add_record", "args": parsed, "error": None}
+    if not isinstance(args, dict):
+        return {"name": name, "args": None, "error": "缺少 args"}
+    return {"name": name, "args": args, "error": None}
+
+
+def validate_tool_call(name, args, pools=None, schema=None):
+    """
+    Protocol v2：schema 驅動驗證一個 tool call（對齊前端 validateCall）。
+
+    Args:
+        name (str): tool 名稱
+        args (dict): 參數
+        pools (dict, optional): 動態 enum 池 {"category": [...], "account": [...], "contact": [...]}
+        schema (dict, optional): tools.schema.json 內容（預設自動載入）
+
+    Returns:
+        dict: {"valid": bool, "needs_confirmation": bool, "issues": [str],
+               "resolved_from": {field: original_value}}
+              valid=False = 靜態檢查失敗（絕不執行）
+              needs_confirmation=True = 動態 enum 未命中（UI 讓使用者選）
+    """
+    if schema is None:
+        schema = load_tools_schema()
+    try:
+        tool = get_tool_definition(schema, name)
+    except KeyError as e:
+        return {"valid": False, "needs_confirmation": False, "issues": [str(e)], "resolved_from": {}}
+    if not isinstance(args, dict):
+        return {"valid": False, "needs_confirmation": False, "issues": ["args 不是物件"], "resolved_from": {}}
+
+    properties = tool["parameters"]["properties"]
+    required = tool["parameters"]["required"]
+    validation = tool.get("validation", {})
+    runtime_optional = set(validation.get("runtime_optional", []))
+    pools = pools or {}
+    issues = []
+    resolved_from = {}
+
+    # 1. 必填（訓練資料必填，但 runtime_optional 欄位運行時允許缺省）
+    for key in required:
+        if key in runtime_optional:
+            continue
+        if key not in args or args[key] in (None, ""):
+            issues.append(f"缺少必要欄位: {key}")
+
+    # 2. 未預期欄位
+    extras = [k for k in args if k not in properties]
+    if extras:
+        issues.append(f"未預期欄位: {', '.join(extras)}")
+
+    # 3. 逐欄位型別 / enum / 範圍 / 日期
+    for key, prop in properties.items():
+        value = args.get(key)
+        if value in (None, ""):
+            continue
+        ptype = prop.get("type")
+        if ptype in ("number", "integer"):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                issues.append(f"欄位 {key} 必須是數值")
+                continue
+            if ptype == "integer" and not float(value).is_integer():
+                issues.append(f"欄位 {key} 必須是整數")
+                continue
+            if prop.get("minimum") is not None and value < prop["minimum"]:
+                issues.append(f"欄位 {key} 必須 ≥ {prop['minimum']}")
+            if prop.get("maximum") is not None and value > prop["maximum"]:
+                issues.append(f"欄位 {key} 必須 ≤ {prop['maximum']}")
+            continue
+        if ptype == "string":
+            if not isinstance(value, str):
+                issues.append(f"欄位 {key} 必須是字串")
+                continue
+            if "enum_source" in prop:
+                pool = pools.get(prop["enum_source"], [])
+                if pool and value not in pool:
+                    matched = _fuzzy_match(value, pool)
+                    if matched is not None:
+                        args[key] = matched
+                        resolved_from[key] = value
+                    else:
+                        issues.append(f"needs_confirmation:{key}={value}")
+            elif "enum" in prop and value not in prop["enum"]:
+                issues.append(f"欄位 {key} 不在合法清單: {value}")
+            if key == "date" and not re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+                issues.append(f"日期格式無效: {value} (必須為 YYYY-MM-DD)")
+
+    # 4. validation 區塊
+    if validation.get("amount") == "gt0" and isinstance(args.get("amount"), (int, float)) and not isinstance(args.get("amount"), bool):
+        if not args["amount"] > 0:
+            issues.append("金額必須大於 0")
+    for rule in validation.get("custom", []):
+        if rule == "from_account != to_account" and args.get("from_account") is not None \
+                and args.get("from_account") == args.get("to_account"):
+            issues.append("轉帳來源與目標帳戶相同")
+    for rule in validation.get("conditional", []):
+        # 支援結構化規則 {"when": {...}, "required": [...], "message": str}
+        if isinstance(rule, dict):
+            when = rule.get("when", {})
+            if all(args.get(k) == v for k, v in when.items()):
+                for req in rule.get("required", []):
+                    if args.get(req) in (None, ""):
+                        issues.append(rule.get("message", f"缺少欄位: {req}"))
+
+    needs_confirmation = any(i.startswith("needs_confirmation:") for i in issues)
+    valid = not any(not i.startswith("needs_confirmation:") for i in issues)
+    return {
+        "valid": valid,
+        "needs_confirmation": needs_confirmation,
+        "issues": [i.replace("needs_confirmation:", "") for i in issues],
+        "resolved_from": resolved_from,
+    }
+
+
+def _normalize_enum(s):
+    return re.sub(r"\s+", "", str(s).strip().lower())
+
+
+def _levenshtein(a, b):
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        curr = [i]
+        for j in range(1, len(b) + 1):
+            curr.append(min(prev[j] + 1, curr[j - 1] + 1,
+                            prev[j - 1] + (0 if a[i - 1] == b[j - 1] else 1)))
+        prev = curr
+    return prev[len(b)]
+
+
+def _fuzzy_match(value, pool):
+    """模糊匹配動態 enum（normalization → 子字串 → 編輯距離 ≤ 1），對齊前端 fuzzyMatch。"""
+    nv = _normalize_enum(value)
+    if not nv:
+        return None
+    for p in pool:
+        if _normalize_enum(p) == nv:
+            return p
+    for p in pool:
+        np_ = _normalize_enum(p)
+        if len(np_) >= 2 and (np_ in nv or nv in np_):
+            return p
+    best, best_dist = None, 2
+    for p in pool:
+        d = _levenshtein(nv, _normalize_enum(p))
+        if d < best_dist:
+            best, best_dist = p, d
+    return best if best_dist <= 1 else None
+
 
 def validate_record(args, categories=None, accounts=None):
     """

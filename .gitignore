@@ -248,3 +248,10 @@ saves/
 exports/
 *.onnx
 llama_compatible_weights/
+
+# === v4 continue-SFT 本機產物（絕不入庫；HF 備份權重在 the-walking-fish/jijun-LM） ===
+hf_ckpt/
+saves_v*/
+*.safetensors
+*.safetensors.index.json
+tmp_*.py

@@ -6,6 +6,7 @@ import argparse
 from datetime import date, timedelta
 from openai import AsyncOpenAI, APIError, RateLimitError
 from trainer.validate_json import extract_tool_call, validate_record
+from gen.build_prompt import build_system_prompt, load_schema
 
 try:
     from dotenv import load_dotenv
@@ -495,6 +496,435 @@ LANG_STYLES = [
     "生活隨筆式的記帳（例：『機車輪胎磨平了換新輪胎一千二，付現金給車行老闆』）"
 ]
 
+# ===========================================================================
+# Protocol v2 多工具資料池（P1）
+# ===========================================================================
+
+# 聯絡人池（add_debt / settle_debt 用；與前端 dynamicEnumSources.contact top-12 模式一致）
+CONTACTS = [
+    "小明", "阿哲", "大偉", "小雯", "阿凱", "美玲", "建宏", "佳蓉",
+    "老陳", "阿強", "佩琪", "志遠", "雅婷", "家豪", "淑芬", "冠廷",
+]
+
+# 各 task 的情境池（打破 LLM 單一邏輯複製）
+V2_SCENARIOS = {
+    "transfer": [
+        "從一個帳戶轉一筆錢到另一個帳戶（儲蓄/湊大額/補錢）",
+        "把現金存進銀行帳戶或數位帳戶",
+        "從銀行帳戶轉錢到行動支付帳戶充值",
+        "信用卡還款前先把錢集中到主帳戶",
+        "把零用錢帳戶的錢挪到日常帳戶",
+        "轉帳幫自己湊整數金額",
+        "從薪資帳戶轉一筆到儲蓄帳戶",
+        "把外幣帳戶或子帳戶的錢轉回來主帳戶",
+    ],
+    "add_debt": [
+        "借朋友或親戚一筆錢（lend：我借出去）",
+        "跟朋友或親戚借錢周轉（borrow：我向他人借）",
+        "幫朋友代墊費用，對方之後要還（lend）",
+        "臨時缺錢向同事或同學借（borrow）",
+        "朋友出國前找我要一筆借款（lend）",
+        "房租到期前不夠錢，跟家人借一些（borrow）",
+        "借錢給朋友買急用的東西（lend）",
+        "跟店員或認識的人先欠著（borrow）",
+    ],
+    "settle_debt": [
+        "朋友還之前借的錢（全數清償）",
+        "朋友分一次還一部分欠款",
+        "收到親戚還的借款",
+        "同事還之前代墊的費用",
+        "朋友還錢時順便請吃飯（只記還款金額）",
+        "收到轉帳還款通知後記帳",
+        "把之前借的錢還給朋友（我還錢出去）",
+        "收到微信/銀行轉帳的還款",
+    ],
+    "date_boost": [
+        "昨天或前天發生的消費（明確相對日期）",
+        "上週某天（一~六）發生的消費",
+        "這週已經過的一天（一~日）發生的消費",
+        "上個月發生的某筆消費（帶月份）",
+        "明天之前發生的消費（今天/剛剛）",
+        "大前天或上上週發生的消費（較遠日期）",
+    ],
+}
+
+# v2 生成器系統提示（{tool_list_text} 與 {ref_date} 會被替換）
+V2_GENERATOR_SYSTEM_PROMPT = """你是一個專門生成機器學習訓練數據集的 AI 助手。你的任務是批量產生「中文口語記帳與 Tool Call 對話軌跡」的訓練資料。
+
+我們有一個記帳助理，被賦予了以下 tools（JSON 格式）：
+{tool_list_text}
+
+你每次需要根據我指定的「目標工具、難度等級」與給定的「分類清單、帳戶清單、聯絡人清單」，產生 1 筆對話資料。
+輸出格式必須嚴格為以下 JSON 結構（不要包裝在陣列中，不要加 Markdown 圍欄）：
+{{
+  "difficulty_level": "Level-1 (Simple)",
+  "messages": [
+    {{"role": "system", "content": "（任意佔位文字，稍後會被程式替換）"}},
+    {{"role": "user", "content": "口語記帳輸入"}},
+    {{"role": "assistant", "content": "純 JSON 字串，格式為 {{"name": "<tool>", "args": {{...}}}}，不要包含 <tool_call> 標籤"}}
+  ]
+}}
+
+請確保：
+1. user 的內容必須極為日常、口語化，符合台灣繁體中文的用語習慣。
+2. 根據難度等級設計對話：
+   - Level-1 (Simple)：直白簡單，無雜訊（例：「從現金轉 500 到玉山帳戶」）。
+   - Level-2 (Noise)：加入日常閒聊與修飾字詞，但金額與對象仍明確。
+   - Level-3 (Reasoning)：需要簡單推理（例：「把零用錢帳戶裡除開週付外剩下的錢都轉到儲蓄」→ 需從上下文推金額；或日期推算）。
+3. 目標工具：{target_tool_desc}
+4. 參考日期 (今天): {ref_date}。若使用者提到相對時間（今天、昨天、前天、上週三、這個月等），你必須以此為基準點計算正確的 date 欄位（YYYY-MM-DD）。若無時間指代，date 設為 '{ref_date}'。
+5. assistant 的 content 欄位必須是「純 JSON 字串」：{{"name": "<tool>", "args": {{...}}}}。使用 "args" 而非 "arguments"。
+6. 提供的分類清單、帳戶清單、聯絡人清單中只能使用清單內的值。
+7. 禁止使用任何 emoji 或顏文字，僅使用純文字。
+"""
+
+# 各 task 的目標工具描述（填入 {target_tool_desc}）
+V2_TARGET_TOOL_DESC = {
+    "add_record": "使用 add_record 工具。args 需包含 amount、category、account、description、type、date。",
+    "transfer": "使用 transfer 工具。args 需包含 from_account、to_account、amount、description、date。from_account 與 to_account 必須不同。",
+    "add_debt": "使用 add_debt 工具。args 需包含 contact、amount、direction、description、date。direction 為 lend（我借出/出借）或 borrow（我借入/向他人借）。",
+    "settle_debt": "使用 settle_debt 工具。args 需包含 contact、amount、description、date。",
+    "date_boost": "使用 add_record 工具。args 需包含 amount、category、account、description、type、date。使用者必須明確提到相對日期詞（昨天/前天/上週X/這週X 等），date 欄位必須是以 {ref_date} 為基準算出的正確日期。",
+}
+
+
+def _weekday_cn_to_idx(s):
+    """中文星期 → ISO weekday (0=一)。"""
+    mapping = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+    return mapping.get(s)
+
+
+def compute_expected_date(text, ref):
+    """從 user 文字解析相對日期詞，回傳預期 date (YYYY-MM-DD) 或 None（無明確日期詞）。"""
+    # 順序重要：先匹配更特定的（上上週/大前天 優先於 上週/前天）
+    if "上上週" in text or "上上禮拜" in text:
+        base = ref - timedelta(days=ref.weekday() + 14)
+        return base.isoformat()
+    if "大前天" in text:
+        return (ref - timedelta(days=3)).isoformat()
+    m = re.search(r"上(?:週|礼拜|禮拜|周)([一二三四五六日天])", text)
+    if m:
+        x = _weekday_cn_to_idx(m.group(1))
+        return (ref - timedelta(days=ref.weekday() - x + 7)).isoformat()
+    m = re.search(r"(?:這|本)(?:週|礼拜|禮拜|周)([一二三四五六日天])", text)
+    if m:
+        x = _weekday_cn_to_idx(m.group(1))
+        if x is not None and x <= ref.weekday():
+            return (ref - timedelta(days=ref.weekday() - x)).isoformat()
+    if "上個月" in text:
+        first_this = ref.replace(day=1)
+        last_last = first_this - timedelta(days=1)
+        return last_last.replace(day=min(ref.day, 28)).isoformat()
+    if "昨天" in text or "昨晚" in text:
+        return (ref - timedelta(days=1)).isoformat()
+    if "前天" in text:
+        return (ref - timedelta(days=2)).isoformat()
+    if any(w in text for w in ("今天", "今日", "剛剛", "剛才", "現在", "方才")):
+        return ref.isoformat()
+    return None
+
+
+# ===========================================================================
+# Protocol v2 樣本生成（P1 主體）
+# ===========================================================================
+
+# v2 訓練錨定日期（dataset.py 訓練時強制改寫成 2026-07-20，故生成資料固定以此為「今天」）
+V2_REF_DATE = date(2026, 7, 20)
+
+# v2 情境注入的 tools 清單（P1：記帳頁 4 工具）
+V2_TOOL_SET = ["add_record", "transfer", "add_debt", "settle_debt"]
+
+# date_boost 可用的相對日期詞（以 2026-07-20 為基準；這週一 = 2026-07-20 當天）
+DATE_BOOST_PHRASES = [
+    "昨天", "前天", "大前天",
+    "上週一", "上週二", "上週三", "上週四", "上週五", "上週六",
+    "這週一",
+    "上個月",
+]
+
+DIRECTION_EXPLAIN = {
+    "lend": "我借錢給對方（貸出）",
+    "borrow": "我向對方借錢（貸入）",
+}
+
+
+def _pick_v2_targets(task, sub_categories, sub_accounts, sub_contacts, local_expense_cats, local_income_cats):
+    """依 task 抽取目標欄位（注入生成 prompt 的約束條件）。"""
+    if task in ("add_record", "date_boost"):
+        cat = random.choice(sub_categories)
+        return {
+            "category": cat,
+            "account": random.choice(sub_accounts),
+            "amount": random.choice([
+                random.randint(30, 300), random.randint(100, 1500),
+                random.randint(500, 5000), random.randint(1000, 30000),
+            ]),
+            "type": "income" if cat in local_income_cats else "expense",
+            "phrase": random.choice(DATE_BOOST_PHRASES) if task == "date_boost" else None,
+        }
+    if task == "transfer":
+        from_acc = random.choice(sub_accounts)
+        to_acc = random.choice([a for a in sub_accounts if a != from_acc])
+        return {
+            "from_account": from_acc,
+            "to_account": to_acc,
+            "amount": random.choice([
+                random.randint(100, 2000), random.randint(500, 10000),
+                random.randint(1000, 50000),
+            ]),
+        }
+    if task in ("add_debt", "settle_debt"):
+        return {
+            "contact": random.choice(sub_contacts),
+            "amount": random.choice([
+                random.randint(50, 1000), random.randint(500, 5000),
+                random.randint(1000, 20000),
+            ]),
+            "direction": random.choice(["lend", "borrow"]) if task == "add_debt" else None,
+        }
+    raise ValueError(f"未知 task: {task}")
+
+
+def _v2_target_line(task, tgt):
+    """生成 prompt 中的目標約束行。"""
+    if task in ("add_record", "date_boost"):
+        line = (f"請確保對話涉及 add_record：分類 '{tgt['category']}'、帳戶 '{tgt['account']}'、"
+                f"金額 {tgt['amount']} 元、type='{tgt['type']}'。")
+        if task == "date_boost":
+            line += f"使用者必須明確使用「{tgt['phrase']}」這個日期詞。"
+        return line
+    if task == "transfer":
+        return (f"請確保對話涉及 transfer：來源帳戶 '{tgt['from_account']}'、"
+                f"目標帳戶 '{tgt['to_account']}'、金額 {tgt['amount']} 元。")
+    if task == "add_debt":
+        return (f"請確保對話涉及 add_debt：聯絡人 '{tgt['contact']}'、"
+                f"direction='{tgt['direction']}'（{DIRECTION_EXPLAIN[tgt['direction']]}）、金額 {tgt['amount']} 元。")
+    if task == "settle_debt":
+        return (f"請確保對話涉及 settle_debt：聯絡人 '{tgt['contact']}'、還款金額 {tgt['amount']} 元。")
+    raise ValueError(f"未知 task: {task}")
+
+
+async def generate_v2_sample(client, model_name, task, difficulty, ref_date,
+                             recent_history=None, thinking_budget=0):
+    """生成 1 筆 Protocol v2 多工具樣本（含自我修正迴圈與 schema 驗證）。"""
+    from trainer.validate_json import extract_tool_calls, validate_tool_call
+
+    # 動態池（與 v1 同策略：子集注入）
+    sub_categories = list(CATEGORIES)
+    extra_cats = random.sample(EXTRA_CATEGORIES_POOL, k=random.randint(1, 2))
+    local_expense_cats = set(EXPENSE_CATS)
+    local_income_cats = set(INCOME_CATS)
+    for ec_name, ec_type in extra_cats:
+        sub_categories.append(ec_name)
+        if ec_type == "expense":
+            local_expense_cats.add(ec_name)
+        else:
+            local_income_cats.add(ec_name)
+    sub_accounts = ["現金"] + random.sample([a for a in ACCOUNTS if a != "現金"], k=random.randint(3, 5))
+    sub_contacts = random.sample(CONTACTS, k=random.randint(4, 6))
+
+    tgt = _pick_v2_targets(task, sub_categories, sub_accounts, sub_contacts,
+                           local_expense_cats, local_income_cats)
+
+    # 完整 system prompt（與既有訓練資料 bit-compatible 的 spaced v1 格式、無星期）
+    pools = {
+        "category": sub_categories,
+        "account": sub_accounts,
+        "contact": sub_contacts,
+    }
+    full_system_content = build_system_prompt(V2_TOOL_SET, ref_date, pools, weekday=False, compact=False)
+
+    target_tool = "add_record" if task == "date_boost" else task
+    tool_list_text = json.dumps(
+        [t for t in load_schema()["tools"] if t["name"] in V2_TOOL_SET], ensure_ascii=False)
+    system_prompt = (
+        V2_GENERATOR_SYSTEM_PROMPT
+        .replace("{tool_list_text}", tool_list_text)
+        .replace("{target_tool_desc}", V2_TARGET_TOOL_DESC[task])
+        .replace("{ref_date}", ref_date.isoformat())
+    )
+
+    scenario = random.choice(V2_SCENARIOS[task])
+    lang_style = random.choice(LANG_STYLES)
+    newline = chr(10)
+    prompt = (
+        f"請生成 1 筆包含 tool call 的對話樣本。{newline}"
+        f"目標工具: {target_tool}{newline}"
+        f"難度等級: {difficulty}{newline}"
+        + (f"可用的分類清單: {sub_categories}{newline}" if task in ("add_record", "date_boost") else "")
+        + f"可用的帳戶清單: {sub_accounts}{newline}"
+        + (f"可用的聯絡人清單: {sub_contacts}{newline}" if task in ("add_debt", "settle_debt") else "")
+        + f"參考日期 (今天): {ref_date.isoformat()}{newline}"
+        + _v2_target_line(task, tgt) + newline
+        + f"【多樣性要求】{newline}"
+        + f"1. 必須圍繞以下情境展開故事：{scenario}（情境只供你理解方向，禁止把情境原文或 (lend)/(borrow) 等標註複製進對話或備註，要用自然口語）{newline}"
+        + f"2. 口語風格限制：{lang_style}{newline}{newline}"
+        + f"【輸出格式要求】{newline}"
+        + f"- 請輸出一個 JSON 物件，包含 difficulty_level 和 messages 兩個欄位。{newline}"
+        + f"- 請勿將 JSON 包裝在陣列中。{newline}"
+        + f"- messages 是一個陣列，包含 system、user、assistant 三筆物件。{newline}"
+        + f"- system 的 content 填任意佔位文字即可（例如：記帳助理）。{newline}"
+        + f"- assistant 的 content 欄位請輸出「純 JSON 字串」：{{\"name\": \"{target_tool}\", \"args\": {{...}}}}，不要包含 <tool_call>、</tool_call> 或任何 XML 標籤。{newline}"
+        + f"- 使用 'args' 而非 'arguments'。{newline}"
+        + f"- 禁止使用 emoji 或顏文字，僅限純文字。{newline}"
+        + f"- 只能使用提供的分類清單、帳戶清單、聯絡人清單中的值。{newline}"
+    )
+
+    max_retries = 3
+    history_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt}
+    ]
+
+    for attempt in range(max_retries):
+        raw_content = ""
+        try:
+            extra_body = None
+            if "qwen" in model_name.lower():
+                if thinking_budget and thinking_budget > 0:
+                    extra_body = {"chat_template_kwargs": {"enable_thinking": True, "thinking_budget": thinking_budget}}
+                else:
+                    extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=history_messages,
+                temperature=0.7,
+                max_tokens=1024,
+                stream=True,
+                extra_body=extra_body
+            )
+            raw_content_parts = []
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                piece = getattr(delta, "content", None)
+                if piece:
+                    raw_content_parts.append(piece)
+            raw_content = "".join(raw_content_parts)
+
+            sample = clean_and_extract_json(raw_content)
+            messages = sample.get("messages", [])
+            assistant_text = ""
+            user_text = ""
+            for msg in messages:
+                if msg.get("role") == "assistant":
+                    content = msg.get("content")
+                    if isinstance(content, str) and content.strip():
+                        assistant_text = content.strip()
+                        if "tool_call" not in assistant_text and assistant_text.startswith("{"):
+                            try:
+                                json.loads(assistant_text)
+                            except Exception:
+                                pass
+                    elif isinstance(content, dict):
+                        msg["content"] = json.dumps(content, ensure_ascii=False)
+                        assistant_text = msg["content"]
+                elif msg.get("role") == "user":
+                    user_text = (msg.get("content") or "").strip()
+
+            if not assistant_text or not user_text:
+                raise ValueError(f"產生的 JSON 樣本缺少 user/assistant 內容。片段: {json.dumps(sample, ensure_ascii=False)[:200]}")
+
+            # 2. v2 解析 + schema 驗證
+            calls = extract_tool_calls(assistant_text)
+            if len(calls) != 1:
+                raise ValueError(f"預期 1 個 tool call，實際 {len(calls)} 個")
+            call = calls[0]
+            if call["error"]:
+                raise ValueError(f"tool call 解析失敗: {call['error']}")
+            if call["name"] != target_tool:
+                raise ValueError(f"tool 名錯誤: 預期 {target_tool}，實際 {call['name']}")
+            args = call["args"]
+
+            vres = validate_tool_call(call["name"], dict(args), pools)
+            if not vres["valid"] or vres["needs_confirmation"]:
+                raise ValueError(f"schema 驗證不合規: {vres['issues']}")
+            # 驗證可能已把模糊匹配的值正規化進 call['args']（同物件參考）
+            args = call["args"]
+
+            # 3. task 專屬檢查
+            if task == "date_boost":
+                if tgt["phrase"] not in user_text:
+                    raise ValueError(f"user 文字未含日期詞 '{tgt['phrase']}'，date_boost 樣本需明確日期指代")
+                # 歧義檢查：文字含多個不同日期詞 → 拒絕（避免教模型任意優先序）
+                # 長字優先（大前天 優先於 前天），finditer 非重疊
+                phrase_re = re.compile("|".join(re.escape(p) for p in sorted(DATE_BOOST_PHRASES, key=len, reverse=True)))
+                found_phrases = set(phrase_re.findall(user_text))
+                if len(found_phrases) > 1:
+                    raise ValueError(f"user 文字含多個日期詞（{found_phrases}），date_boost 需單一日期指代")
+                expected = compute_expected_date(user_text, ref_date)
+                if expected is None:
+                    raise ValueError("無法從 user 文字解析預期日期")
+                if args.get("date") != expected:
+                    raise ValueError(f"date 錯誤: 預期 {expected}（依 '{tgt['phrase']}'），實際 {args.get('date')}")
+            if task == "add_debt":
+                # 語意一致性：borrow 詞 vs lend 詞 與 direction 矛盾 → 拒絕
+                c = tgt["contact"]
+                borrow_sig = re.search(rf"(跟|向|找){c}\s*借|{c}\s*借我", user_text)
+                lend_sig = re.search(rf"借給\s*{c}|{c}\s*(跟|向|找)我\s*借|{c}\s*跟我\s*借", user_text)
+                if borrow_sig and tgt["direction"] != "borrow":
+                    raise ValueError(f"方向矛盾：文字像 borrow（'{borrow_sig.group(0)}'）但 direction=lend")
+                if lend_sig and tgt["direction"] != "lend":
+                    raise ValueError(f"方向矛盾：文字像 lend（'{lend_sig.group(0)}'）但 direction=borrow")
+            # 情境洩漏檢查：description/user 不得包含情境池原文片段（≥6 字）
+            desc_check = f"{user_text} {str(args.get('description', ''))}"
+            for scen in V2_SCENARIOS.get(task, []):
+                for w in re.findall(r"[\u4e00-\u9fff]{6,}", scen):
+                    if w in desc_check:
+                        raise ValueError(f"情境原文洩漏進對話（'{w}'），請用自己的口語重新描述")
+            if task in ("add_record", "date_boost"):
+                cat = args.get("category", "")
+                rtype = args.get("type", "")
+                if rtype == "income" and cat not in local_income_cats:
+                    raise ValueError(f"分類 '{cat}' 不適用於 type=income")
+                elif rtype == "expense" and cat not in local_expense_cats:
+                    raise ValueError(f"分類 '{cat}' 不適用於 type=expense")
+
+            # 4. 排重
+            if recent_history:
+                desc_text = str(args.get("description", "")).strip()
+                if user_text in recent_history or (desc_text and desc_text in recent_history):
+                    raise ValueError(f"生成內容與歷史語料重複 ('{user_text[:30]}')，請重新思考")
+
+            # 5. 縫合完整 system prompt + tool_call 標籤 + task 欄位
+            #    注意：call 含 'error' 欄位（extract_tool_calls 的包裝），label 只取 name+args
+            msg_map = {m["role"]: m for m in messages}
+            msg_map["system"]["content"] = full_system_content
+            label_obj = {"name": call["name"], "args": call["args"]}
+            msg_map["assistant"]["content"] = f"<tool_call>{json.dumps(label_obj, ensure_ascii=False)}</tool_call>"
+            sample["task"] = target_tool
+            if task == "date_boost":
+                sample["date_boost"] = True
+            sample["difficulty_level"] = difficulty
+            return sample
+
+        except ValueError as ve:
+            error_detail = str(ve)
+            print(f"警告 (v2 修復嘗試 {attempt+1}/{max_retries}): {error_detail}")
+            if attempt < max_retries - 1:
+                sep = chr(10) * 2
+                fix_msg = f"【重要修復提醒】上一輪生成失敗，原因：{error_detail}{sep}請嚴格輸出合法且可被解析的 JSON 物件。"
+                history_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"{prompt}{sep}{fix_msg}"}
+                ]
+            else:
+                print(f"錯誤: 已達到最大自我修復重試次數 ({max_retries})，放棄此輪樣本生成。")
+        except RateLimitError as e:
+            backoff_time = random.uniform(5.0, 10.0)
+            print(f"[RateLimitError 429] 請求頻率過快: {e}。隨機退避等待 {backoff_time:.2f} 秒後重試...")
+            await asyncio.sleep(backoff_time)
+        except APIError as e:
+            print(f"[APIError {e.code}] 發生 API 錯誤 ({e.message})。隨機等待 3 秒後重試...")
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+        except Exception as e:
+            print(f"請求拋出其他異常: {e}。隨機等待 3 秒後重試...")
+            await asyncio.sleep(3.0)
+
+    return None
+
+
 # 系統 Prompt 與 Tools 定義，用於教導大模型如何生成樣本
 # 我們特別在結尾強調了 "JSON" 這個字，以相容各類大模型強制 JSON 輸出的約束
 GENERATOR_SYSTEM_PROMPT = """
@@ -814,12 +1244,12 @@ async def generate_single_sample(client, model_name, difficulty, categories, acc
 async def generate_dataset(api_url, api_key, model_name, num_samples, out_dir, concurrency=2, rest_interval=0, rest_duration=1, thinking_budget=0, bias_categories=None, short_ratio=0.25):
     os.makedirs(out_dir, exist_ok=True)
     raw_path = os.path.join(out_dir, "raw_generated.jsonl")
-    
+
     # 1. 偵測並讀取現有的生成存檔以支援斷點續傳
     all_samples = []
     history_user_texts = []
     existing_counts = {"Level-1 (Simple)": 0, "Level-2 (Noise)": 0, "Level-3 (Reasoning)": 0}
-    
+
     if os.path.exists(raw_path):
         print(f"偵測到歷史生成的資料存檔 {raw_path}，正在載入進度以支援斷點續傳...")
         with open(raw_path, "r", encoding="utf-8") as f:
@@ -950,13 +1380,142 @@ async def generate_dataset(api_url, api_key, model_name, num_samples, out_dir, c
     print(f"  - 訓練集路徑: {train_path} ({len(train_data)} 筆)")
     print(f"  - 測試集路徑: {test_path} ({len(test_data)} 筆)")
 
+
+# ===========================================================================
+# Protocol v2 排程（P1）
+# ===========================================================================
+
+DIFFICULTIES = ["Level-1 (Simple)", "Level-2 (Noise)", "Level-3 (Reasoning)"]
+DIFF_RATIO = {"Level-1 (Simple)": 0.4, "Level-2 (Noise)": 0.3, "Level-3 (Reasoning)": 0.3}
+
+
+def _normalize_difficulty(diff):
+    if not diff:
+        return None
+    for d in DIFFICULTIES:
+        if diff.startswith(d.split(" ")[0]):  # Level-1 / Level-2 / Level-3
+            return d
+    return None
+
+
+async def generate_dataset_v2(api_url, api_key, model_name, task, count, out_dir,
+                              concurrency=2, rest_interval=0, rest_duration=1, thinking_budget=0):
+    """生成 Protocol v2 多工具樣本。
+
+    輸出：{out_dir}/v2_{task}/raw.jsonl（只產生，不分 train/test —— 混合與切分由
+    gen/mix_v2_dataset.py 統一處理，避免每個 task 獨立 80/20 造成 task 間資料混流）。
+    支援斷點續傳（raw.jsonl 既有行数會扣除）。
+    """
+    # date_boost 是 add_record 的日期強化子任務：生成時仍傳 task='date_boost'
+    # （generate_v2_sample 會做日期詞驗證），但資料歸入 add_record 資料夾（同一 tool）。
+    gen_task = task
+    out_dir = os.path.join(out_dir, "v2_add_record" if task == "date_boost" else f"v2_{task}")
+    os.makedirs(out_dir, exist_ok=True)
+    raw_path = os.path.join(out_dir, "raw.jsonl")
+
+    existing = 0
+    history_user_texts = []
+    if os.path.exists(raw_path):
+        with open(raw_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    s = json.loads(line)
+                    existing += 1
+                    for msg in s.get("messages", []):
+                        if msg.get("role") == "user":
+                            history_user_texts.append(msg["content"].strip())
+                except Exception:
+                    pass
+        print(f"偵測到歷史生成 {existing} 筆（斷點續傳），載入 {len(history_user_texts)} 筆語料特徵。")
+
+    if existing >= count:
+        print(f"[{gen_task}] 已生成 {existing}/{count} 筆，無需繼續。")
+        return raw_path
+
+    # 各難度目標（4:3:3）
+    counts = {d: int(count * DIFF_RATIO[d]) for d in DIFFICULTIES}
+    counts["Level-3 (Reasoning)"] = count - counts["Level-1 (Simple)"] - counts["Level-2 (Noise)"]
+
+    import httpx
+    limits = httpx.Limits(max_connections=concurrency * 10, max_keepalive_connections=concurrency * 2)
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=api_url,
+        http_client=httpx.AsyncClient(limits=limits)
+    )
+
+    import time
+    last_rest_time = time.time()
+
+    for difficulty, target in counts.items():
+        # 統計既有 raw 中該難度數量（容錯比對 Level-1 等短寫法）
+        have = 0
+        if os.path.exists(raw_path):
+            with open(raw_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        s = json.loads(line)
+                        if _normalize_difficulty(s.get("difficulty_level")) == difficulty:
+                            have += 1
+                    except Exception:
+                        pass
+        if have >= target:
+            print(f"[{task}/{difficulty}] 已有 {have}/{target} 筆，跳過。")
+            continue
+        print(f"開始生成 [{task}/{difficulty}]，目標 {target} 筆（當前 {have}/{target}）...")
+        completed = have
+        while completed < target:
+            if rest_interval > 0:
+                elapsed_min = (time.time() - last_rest_time) / 60.0
+                if elapsed_min >= rest_interval:
+                    print(f"\n[顯卡保護] 已持續 {elapsed_min:.2f} 分鐘，休息 {rest_duration} 分鐘...")
+                    await asyncio.sleep(rest_duration * 60)
+                    last_rest_time = time.time()
+                    print("[顯卡保護] 休息結束。\n")
+
+            needed = target - completed
+            batch_size = min(concurrency, needed)
+
+            async def worker():
+                nonlocal completed
+                if completed >= target:
+                    return
+                await asyncio.sleep(random.uniform(0.1, 0.5))
+                sample = await generate_v2_sample(
+                    client, model_name, task, difficulty, V2_REF_DATE,
+                    recent_history=history_user_texts, thinking_budget=thinking_budget
+                )
+                if sample:
+                    for msg in sample.get("messages", []):
+                        if msg.get("role") == "user":
+                            history_user_texts.append(msg["content"].strip())
+                    with open(raw_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                    completed += 1
+                    if completed % 5 == 0 or completed == target:
+                        print(f"[{task}/{difficulty}] 已完成 {completed}/{target} 筆")
+
+            tasks = [worker() for _ in range(batch_size)]
+            await asyncio.gather(*tasks)
+
+    # 重讀 raw 統計
+    with open(raw_path, "r", encoding="utf-8") as f:
+        total = sum(1 for l in f if l.strip())
+    print(f"\n[{task}] 生成完畢：{raw_path} ({total} 筆)")
+    return raw_path
+
 def main():
     parser = argparse.ArgumentParser(description="使用 OpenAI SDK 批量生成分層記帳 dataset 腳本")
     parser.add_argument("--api_url", type=str, default=os.environ.get("OPENAI_BASE_URL"), help="您的 API 端點 (可設於 .env 的 OPENAI_BASE_URL)")
     parser.add_argument("--api_key", type=str, default=os.environ.get("OPENAI_API_KEY"), help="API 金鑰 (可設於 .env 的 OPENAI_API_KEY)")
-    parser.add_argument("--model", type=str, default=os.environ.get("LLM_MODEL", "qwen3.6-35b-a3b-mtp"), help="用於生成數據集的大模型名稱 (可設於 .env 的 LLM_MODEL)")
-    parser.add_argument("--count", type=int, default=100, help="總共生成的樣本數量")
+    parser.add_argument("--model", type=str, default=os.environ.get("LLM_MODEL", "vllm/Qwen3.8-27B"), help="用於生成數據集的大模型名稱 (可設於 .env 的 LLM_MODEL)")
+    parser.add_argument("--count", type=int, default=100, help="每個 task 生成的樣本數量（v1 模式為總數）")
     parser.add_argument("--out_dir", type=str, default="./dataset", help="資料集輸出目錄")
+    parser.add_argument("--task", type=str, default="", help="Protocol v2 模式：逗號分隔的 task 清單（transfer,add_debt,settle_debt,date_boost）。留空 = v1 add_record 模式")
     parser.add_argument("--concurrency", type=int, default=int(os.environ.get("CONCURRENCY", 2)), help="並行生成的呼叫數量 (預設為 2，可設於 .env 的 CONCURRENCY)")
     parser.add_argument("--rest_interval", type=float, default=float(os.environ.get("REST_INTERVAL", 0)), help="每隔多少分鐘進行一次休息 (預設 0 = 不休息，可設於 .env 的 REST_INTERVAL)")
     parser.add_argument("--rest_duration", type=float, default=float(os.environ.get("REST_DURATION", 1)), help="每次休息的分鐘數 (預設 1，可設於 .env 的 REST_DURATION)")
@@ -983,19 +1542,46 @@ def main():
             "  OPENAI_BASE_URL=https://api.openai.com/v1\n"
         )
     
-    asyncio.run(generate_dataset(
-        args.api_url, 
-        args.api_key, 
-        args.model, 
-        args.count, 
-        args.out_dir,
-        args.concurrency,
-        args.rest_interval,
-        args.rest_duration,
-        args.thinking_budget,
-        [c.strip() for c in args.bias_categories.split(",") if c.strip()] if args.bias_categories else None,
-        args.short_ratio
-    ))
+    asyncio.run(_run_generation(args))
+
+
+async def _run_generation(args):
+    if args.task:
+        # 支援 "task" 或 "task=count" 格式（每 task 獨立數量）
+        tasks = []
+        for t in args.task.split(","):
+            t = t.strip()
+            if not t:
+                continue
+            if "=" in t:
+                name, cnt = t.split("=", 1)
+                tasks.append((name.strip(), int(cnt)))
+            else:
+                tasks.append((t, args.count))
+        valid = {"transfer", "add_debt", "settle_debt", "date_boost", "add_record"}
+        for t, _ in tasks:
+            if t not in valid:
+                raise ValueError(f"未知 task '{t}'，可用: {sorted(valid)}")
+        for t, cnt in tasks:
+            await generate_dataset_v2(
+                args.api_url, args.api_key, args.model, t, cnt, args.out_dir,
+                args.concurrency, args.rest_interval, args.rest_duration, args.thinking_budget
+            )
+        print("\n=== v2 生成全部完成。下一步: python gen/mix_v2_dataset.py ===")
+    else:
+        await generate_dataset(
+            args.api_url,
+            args.api_key,
+            args.model,
+            args.count,
+            args.out_dir,
+            args.concurrency,
+            args.rest_interval,
+            args.rest_duration,
+            args.thinking_budget,
+            [c.strip() for c in args.bias_categories.split(",") if c.strip()] if args.bias_categories else None,
+            args.short_ratio
+        )
 
 if __name__ == "__main__":
     main()

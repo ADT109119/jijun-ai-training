@@ -1,0 +1,374 @@
+{
+  "protocol": "jijun-tool-calling",
+  "version": "2.0-draft",
+  "updated": "2026-08-21",
+  "note": "單一真相源 (P0)。由 tools.schema.json 生成: (1) 訓練資料 system prompt 與 label (gen/build_prompt.py) (2) 前端 prompt 組裝與 validator (未來 src/js/toolsSchema.js，由本檔生成) (3) 評測腳本 per-task 欄位來源。改動 tool 定義只改本檔。",
+  "serialization": {
+    "ensure_ascii": false,
+    "separators": [
+      ", ",
+      ": "
+    ],
+    "note": "canonical = Python json.dumps 預設格式（冒號/逗號後有空格），與全部現有訓練資料位元一致。前端現行 JSON.stringify（無空格）為 v1-compat 變體，差異見 docs/p0-protocol-v2-spec.md §3.2。"
+  },
+  "prompt_template": {
+    "prefix": "今天是 {ref_date}{weekday}。你是一個記帳助理。你被賦予了以下 tools:\n{tools_json}",
+    "weekday_format": "（{weekday_zh}）",
+    "weekday_v1": false,
+    "weekday_v2_recommended": true,
+    "note": "v1 訓練資料無星期（weekday_v1=false）；前端生產 prompt 有星期。v2 建議保留星期（相對日期解析有用，且生產 prompt 已含），於 T6 日期強化批次確認。"
+  },
+  "dynamic_enum_sources": {
+    "category": {
+      "source": "dataService.getActiveCategories",
+      "max_items": null,
+      "fuzzy_on_miss": true
+    },
+    "account": {
+      "source": "dataService.getAccounts",
+      "max_items": null,
+      "fuzzy_on_miss": true
+    },
+    "contact": {
+      "source": "dataService.getContacts",
+      "max_items": 12,
+      "fuzzy_on_miss": true,
+      "note": "超過 12 個時截斷 top-12（按最近使用），validator 端模糊匹配兜底"
+    }
+  },
+  "tools": [
+    {
+      "name": "add_record",
+      "description": "新增一筆記帳記錄",
+      "phase": "v1",
+      "kind": "action",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "type": "string",
+            "enum_source": "category"
+          },
+          "account": {
+            "type": "string",
+            "enum_source": "account"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "expense",
+              "income"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 格式日期，僅日期精度，例如 YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "amount",
+          "category",
+          "account",
+          "type",
+          "date"
+        ]
+      },
+      "validation": {
+        "amount": "gt0",
+        "date": "yyyy-mm-dd",
+        "additional_properties": false,
+        "note": "validation 欄位只供 validator 使用，絕不出現在 prompt 的 rendered schema 中（保持 prompt 位元穩定）",
+        "runtime_optional": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "transfer",
+      "description": "在兩個帳戶之間轉帳",
+      "phase": "p1",
+      "kind": "action",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_account": {
+            "type": "string",
+            "enum_source": "account"
+          },
+          "to_account": {
+            "type": "string",
+            "enum_source": "account"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 格式日期，僅日期精度，例如 YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "from_account",
+          "to_account",
+          "amount",
+          "date"
+        ]
+      },
+      "validation": {
+        "amount": "gt0",
+        "date": "yyyy-mm-dd",
+        "additional_properties": false,
+        "custom": [
+          "from_account != to_account"
+        ],
+        "runtime_optional": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "add_debt",
+      "description": "記錄借出或借入的欠款",
+      "phase": "p1",
+      "kind": "action",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "contact": {
+            "type": "string",
+            "enum_source": "contact"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "lend",
+              "borrow"
+            ],
+            "description": "lend=借出（對方欠我）, borrow=借入（我欠對方）"
+          },
+          "description": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 格式日期，僅日期精度，例如 YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "contact",
+          "amount",
+          "direction",
+          "date"
+        ]
+      },
+      "validation": {
+        "amount": "gt0",
+        "date": "yyyy-mm-dd",
+        "additional_properties": false,
+        "runtime_optional": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "settle_debt",
+      "description": "記錄還款（部分或全額償還欠款）",
+      "phase": "p1",
+      "kind": "action",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "contact": {
+            "type": "string",
+            "enum_source": "contact"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 格式日期，僅日期精度，例如 YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "contact",
+          "amount",
+          "date"
+        ]
+      },
+      "validation": {
+        "amount": "gt0",
+        "date": "yyyy-mm-dd",
+        "additional_properties": false,
+        "runtime_optional": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "add_recurring",
+      "description": "新增週期性交易（固定日期 repeating 的支出或收入）",
+      "phase": "p2",
+      "kind": "action",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "type": "string",
+            "enum_source": "category"
+          },
+          "account": {
+            "type": "string",
+            "enum_source": "account"
+          },
+          "schedule": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "weekly"
+            ],
+            "description": "monthly=每月, weekly=每週"
+          },
+          "schedule_value": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28,
+            "description": "monthly: 每月第幾號 (1-28); weekly: 星期幾 (1=星期一, 7=星期日)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "expense",
+              "income"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 格式日期，僅日期精度，例如 YYYY-MM-DD（首次交易日期）"
+          }
+        },
+        "required": [
+          "amount",
+          "category",
+          "account",
+          "schedule",
+          "schedule_value",
+          "type",
+          "date"
+        ]
+      },
+      "validation": {
+        "amount": "gt0",
+        "date": "yyyy-mm-dd",
+        "additional_properties": false,
+        "note": "yearly 暫緩：需 MM-DD 字串與整數混合型別，留 P2 再決策",
+        "runtime_optional": [
+          "date"
+        ]
+      }
+    },
+    {
+      "name": "query_stats",
+      "description": "查詢統計資料（由 App 端計算並顯示，不建立任何紀錄）",
+      "phase": "p3",
+      "kind": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "total",
+              "by_category",
+              "top_expenses"
+            ],
+            "description": "total=總額, by_category=指定分類金額, top_expenses=Top N 支出"
+          },
+          "value": {
+            "type": "string",
+            "enum_source": "category",
+            "description": "metric=by_category 時為分類名稱"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "this_week",
+              "last_week",
+              "this_month",
+              "last_month",
+              "this_year",
+              "last_year"
+            ]
+          },
+          "account": {
+            "type": "string",
+            "enum_source": "account"
+          }
+        },
+        "required": [
+          "metric",
+          "period"
+        ]
+      },
+      "validation": {
+        "additional_properties": false,
+        "conditional": [
+          { "when": { "metric": "by_category" }, "required": ["value"], "message": "metric=by_category 時缺少 value 欄位" }
+        ],
+        "note": "period 一律用 enum，模型不算日期；app 端用既有 getCurrentDateAnchor 同一套邏輯解析"
+      }
+    }
+  ],
+  "multi_call_output": {
+    "format": "sequence of <tool_call>{\"name\": <tool>, \"args\": {...}}</tool_call> blocks (1..N)",
+    "no_array_wrapper": true,
+    "note": "v1 = 單 block；v2 擴充為 1..N 個獨立 block，block 之間容許空白/換行。不用 JSON 陣列包裹（58M 生成獨立 JSON 物件比生成 list 結構穩定）。parser 用全域 regex 匹配。"
+  },
+  "contexts": {
+    "add_page": [
+      "add_record",
+      "transfer",
+      "add_debt",
+      "settle_debt",
+      "add_recurring"
+    ],
+    "stats_page": [
+      "query_stats"
+    ],
+    "note": "UI 情境注入：只把當前頁面相關 tools 放進 prompt（58M 在長 prompt 會失焦）。P1 上線時記帳頁實際注入 add_record+transfer+add_debt+settle_debt（add_recurring 留 P2）。"
+  },
+  "guardrail": {
+    "add_record": {
+      "format_pass_min": 0.97,
+      "exact_match_min": 0.36,
+      "amount_correct_min": 0.9,
+      "note": "現況基線：格式 98.68% / EM 39.35% / 金額 92.30%（831 筆 test_strata）。每次新階段 SFT 後必測，未達即回退資料配比。"
+    },
+    "new_tool": {
+      "format_pass_min": 0.95,
+      "tool_selection_min": 0.9,
+      "note": "新 tool 的格式通過率與工具選擇正確率（不誤呼 add_record）"
+    }
+  }
+}

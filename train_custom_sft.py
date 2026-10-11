@@ -33,6 +33,10 @@ def parse_args():
     parser.add_argument("--d_model", type=int, default=None, help="覆寫隱藏層維度")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout 比率 (預設 0.1)")
     parser.add_argument("--weight_decay", type=float, default=0.1, help="AdamW weight decay (預設 0.1)")
+    parser.add_argument("--amp", type=str, default="bf16", choices=["off", "bf16"],
+                        help="混合精度模式：bf16(預設，顯存減半、桌面餘裕最佳) 或 off(FP32)")
+    parser.add_argument("--vram_fraction", type=float, default=0.6,
+                        help="進程 VRAM 硬上限比例(0~1)。預設 0.6＝12GB 卡留 40%% 給桌面；超出即報 OOM 而不會擠爆共享記憶體")
     return parser.parse_args()
 
 def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, num_cycles=0.5):
@@ -46,7 +50,7 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
     return LambdaLR(optimizer, lr_lambda)
 
-def run_evaluation(model, dataloader, tokenizer, device, eval_generate=False, max_eval_samples=5, label_smoothing=0.0):
+def run_evaluation(model, dataloader, tokenizer, device, eval_generate=False, max_eval_samples=5, label_smoothing=0.0, amp_enabled=False):
     """
     驗證評估：計算 Loss 的同時，整合前端 JSON 解析器統計 JSON_Format_Pass_Rate
     """
@@ -64,7 +68,8 @@ def run_evaluation(model, dataloader, tokenizer, device, eval_generate=False, ma
             labels = batch["labels"].to(device)
             
             # 前向傳播計算 loss
-            logits, loss = model(input_ids, targets=labels, label_smoothing=label_smoothing)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                logits, loss = model(input_ids, targets=labels, label_smoothing=label_smoothing)
             total_loss += loss.item() * (labels != -100).sum().item()
             total_tokens += (labels != -100).sum().item()
 
@@ -126,8 +131,16 @@ def main():
 
     # 1. 初始化設備
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    amp_enabled = (args.amp == "bf16" and device == "cuda")
+    if device == "cuda":
+        # 進程級 VRAM 硬上限：超過上限直接在本進程報 OOM，
+        # 不會讓 Windows WDDM 把分配擠到共享記憶體（桌面卡頓元凶）。
+        if 0.0 < args.vram_fraction < 1.0:
+            torch.cuda.set_per_process_memory_fraction(args.vram_fraction)
+            total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"VRAM 上限: {args.vram_fraction:.0%} (~{total_gb * args.vram_fraction:.1f} GB)，保留桌面餘裕")
     print(f"=== 啟動記帳模型 SFT 訓練 (From Scratch) ===")
-    print(f"運行裝置: {device}")
+    print(f"運行裝置: {device} | 混合精度: {'bf16' if amp_enabled else 'FP32'}")
     print(f"訓練格式: {args.format}")
 
     # 2. 載入分詞器
@@ -203,7 +216,8 @@ def main():
             labels = batch["labels"].to(device)
 
             # 前向傳播
-            logits, loss = model(input_ids, targets=labels, label_smoothing=args.label_smoothing)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                logits, loss = model(input_ids, targets=labels, label_smoothing=args.label_smoothing)
 
             # 反向傳播
             optimizer.zero_grad()
@@ -232,7 +246,8 @@ def main():
             model, val_loader, tokenizer, device,
             eval_generate=args.eval_generate,
             max_eval_samples=args.max_eval_samples,
-            label_smoothing=args.label_smoothing
+            label_smoothing=args.label_smoothing,
+            amp_enabled=amp_enabled,
         )
         
         print(f"驗證集指標:")

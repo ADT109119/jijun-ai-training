@@ -58,10 +58,11 @@ class BookkeepingDataset(Dataset):
                 assistant_content = msg["content"]
 
         # 容錯補全 system prompt 中的日期前綴
-        if system_content and not system_content.startswith("今天是 2026-07-20。"):
-            import re
-            if system_content.startswith("今天是"):
-                system_content = re.sub(r"^今天是\s*\d{4}-\d{2}-\d{2}[。，\s]*", "", system_content)
+        # （2026-10-11 修正：舊寫法把「任何」日期前綴一律改寫成固定 2026-07-20，
+        #  導致模型訓練時永遠看不到真實 ref_date，date 欄位無法學習
+        #  （實測 v3/HF 模型 date 準確率 0.2-0.4%，README 宣稱的 61% 是舊固定錨點資料）。
+        #  正確語意：僅在「完全沒有日期前綴」的舊資料上補一個錨點日期。）
+        if system_content and not system_content.startswith("今天是"):
             system_content = "今天是 2026-07-20。" + system_content
 
         # 2. 如果為壓縮格式，則將 assistant_content 轉換為特殊標記協定

@@ -8,16 +8,17 @@
 
 本專案從零開始設計並訓練了一個 **58M 參數** 的超微型 Decoder-only 語言模型（BookkeepingLM）。本研究聚焦於**「在極小型端側 LLM 中，Tool Calling 的瓶頸不只是模型容量限制，更是輸出協議 (Output Protocol) 的冗餘。我們提出語意協議壓縮 (Semantic Protocol Compression) 概念，以更短且語義明確的特殊 Token 取代 JSON 格式，旨在降低生成長度並提升格式穩定性。」**
 
-> **⚠️ 最新現況 (2026-08-02)**
-> 經過多輪迭代，目前的實際模型與管線如下（下列規格優先於本文舊的 30M 研究規格）：
+> **⚠️ 最新現況 (2026-10-11)**
+> 經過多輪迭代（v1 2026-08 → v2 協議 v2 → v3 日期強化 → v4/v4c 短語強化），目前的實際模型與管線如下（下列規格優先於本文舊的 30M 研究規格）：
 >
-> * **模型**：`BookkeepingLM` 約 **58M 參數**（12 層、d_model=768、8 heads/4 KV heads、max_seq_len=1024、vocab=6400 + 8 個記帳特殊 Token），實作於 `model/model.py`。
+> * **模型**：`BookkeepingLM` 約 **58M 參數**（12 層、d_model=768、8 heads/4 KV heads、max_seq_len=1024、vocab=6400 + 8 個記帳特殊 Token），實作於 `model/model.py`。發佈權重：Hugging Face `the-walking-fish/jijun-LM`（safetensors + tokenizer），可經 `restore_hf_checkpoint.py` 還原為本機 `.pt` 做 continue-SFT（111 tensors，tokenizer ID 逐位相容）。
 > * **輸出協議**：目前採用 **JSON `<tool_call>{...}</tool_call>` 協議**（`--format json`），並以與 PWA 前端對齊的 parser (`trainer/validate_json.py`) 驗證。
-> * **資料生成**：改用 **`vllm/Qwen3.6-27B`（`enable_thinking=False`）** 批次生成 15 個基礎類別的分層口語樣本（`generate_dataset.py`），約 4 批共 5500 筆 raw 樣本。
-> * **嚴格過濾**：`filter_dataset.py` 採**舉證責任倒置**的語意對齊檢查（僅在「描述明確屬於其他基礎分類」時才刪除，避免誤刪合法樣本），保留 **4,154 筆**（train 3,323 / test 831，`split_dataset.py` 80/20）。
-> * **資料調整**：全檔 4,154 筆已完成 **system prompt 星期幾注入**（`今天是 YYYY-MM-DD（星期X）`，與查詢日期錨定）；正進行**錯誤標籤人工稽核修正**（部分批次已完成，剩餘批次稽核中，詳見 `results.tsv`）。
-> * **訓練**：以預訓練權重 `./saves/best_pretrain_model.pt` 起步做全量 SFT（`train_custom_sft.py --pretrained_path ./saves/best_pretrain_model.pt --eval_generate --max_eval_samples 20`），最佳 checkpoint → `./saves/best_bookkeeping_model.pt`。
-> * **最新評測**（`evaluate_benchmark.py`，831 筆測試集）：JSON 版 format 通過率 **98.68%**、EM **39.35%**；Compressed 版 format 通過率 **100.0%**、EM **38.63%**，詳見第 6 節最新結果表。
+> * **資料管線**：`gen/` 目錄為現行產生器（v3 `build_v3_dataset.py` 日期強化、v4/v4c `build_short_phrase.py` + `build_v4c.py` 短語強化）；舊 `generate_dataset.py`（vllm Qwen3.6-27B API 生成）為 v1 產線。
+> * **訓練管線**：`train_custom_sft.py` 已內建 **bf16 混合精度**（`--amp bf16`，預設開）與**進程級 VRAM 硬上限**（`--vram_fraction 0.6`），在 12GB 消費顯卡上訓練同時保留桌面餘裕，杜絕 WDDM 溢出共享記憶體拖慢系統。
+> * **已修復的兩個訓練管線級 bug**（詳見 `docs/t6-v3-dataset-notes.md`、`docs/t7-v4c-short-phrase-notes.md`）：
+>   1. `gen/build_prompt._weekday_zh_for` 星期注入錯位一天（v3）；
+>   2. `dataset.py` 把訓練 system prompt 日期全部硬編碼為同一天 → `date` 欄位學習被徹底摧毀（訓練時所見日期恆定、gold label 卻是真實日期），v4b 修復。
+> * **最新評測**（v4c continue-SFT，greedy；v1 基線 831 筆 gate 集與 v3/v4c 各集詳見第 6.1 節）：短語集 EM **75.7%**（category/description/type 全 100%）、v3 測試集 date **89.5%**（bug 修復前近 0%）、全新詞泛化探針 amount **90.6%**（證明「從句子抄金額」為真學會而非背誦）。
 
 ---
 
@@ -83,9 +84,27 @@
 
 ## 6. 實驗結果 (Experimental Results)
 
-### 6.1 最新評測結果 (58M 現況模型, 2026-08-02)
+### 6.1 最新評測結果 (58M 現況模型, 2026-10-11, v4c continue-SFT)
 
-以下為當前 58M 模型在 `dataset/qwen_full/test_strata.jsonl`（831 筆，含日期欄位、星期錨定）上的實際評測結果（`evaluate_benchmark.py` 全量自迴歸 Greedy 推論）：
+v4c 以 HF 發佈權重 `the-walking-fish/jijun-LM` 經 `restore_hf_checkpoint.py` 還原為起點做 continue-SFT（v3 資料 + v4c 短語強化資料混合，bf16，lr 5e-5，4 epochs，val loss 0.0721）。評測以 `eval_checkpoints.py` greedy 自迴歸推論：
+
+| 測試集 | 筆數 | 格式通過 | EM | amount | category | account | description | type | date |
+|--------|------|---------|-----|--------|----------|---------|-------------|------|------|
+| 短語回歸集 `dataset/v4c/regression_v4.jsonl`（物品+金額型，含「早餐60」） | 103 | **100%** | **75.7%** | 92.2% | **100%** | 87.4% | **100%** | **100%** | 96.1% |
+| 全新詞泛化探針 `dataset/v4c/probe_unseen.jsonl`（20 個訓練從未見過的商品詞） | 160 | **100%** | 16.2% | **90.6%** | 30.0% | 78.8% | 87.5% | 84.4% | **93.8%** |
+| v3 測試集 `dataset/v3/test_v3.jsonl`（長句回歸） | 493 | **100%** | 20.7% | 95.3% | 82.4% | 97.0% | 26.4%* | 96.8% | **89.5%** |
+| Gate 抽樣 `dataset/v4/gate_sub300.jsonl` | 300 | **100%** | 19.3% | 96.0% | 70.0% | 98.7% | 32.0%* | 86.7% | 75.3% |
+
+> **要點**：
+> 1. **date 欄位從近 0% 修復至 89.5%**——根因是 `dataset.py` 訓練期把 system prompt 日期硬編碼為同一天（模型所見日期恆定、gold label 卻是真實日期，等於要求模型猜測不可學的訊號），詳見 `docs/t7-v4c-short-phrase-notes.md`。
+> 2. **短語型輸入（「早餐60」式物品+金額）EM 從 0% → 75.7%**。失敗主因（v4b 前）是訓練集全額湊整成十/百倍數 + 商品詞未入池，模型學會「猜該品項典型金額」而非「抄句子裡的數字」；v4c 以破先驗極端值（如早餐 10 元、牛排 20 元）與 35% 非湊整金額強制學會抄寫機制。
+> 3. **全新詞探針 amount 90.6% / date 93.8%** 是抄寫機制真正學會的證據：這些商品詞在訓練中從未出現，模型仍正確從句子提取金額與日期。其 category 30% 屬預期（無語義先驗可依循的品項對 58M 模型是合理上限）。
+> 4. *description 欄位 EM 低（26–32%）是對自由文字做逐字比對的必然結果，非生成錯誤；PWA 前端僅顯示不驗證該欄位。
+> 5. 短語集 account 87.4% 的失敗多為測試資料隨機指定非現金帳戶但句子無支付線索，模型預設現金在產品語意上反而更合理。
+
+### 6.1b 前代基線 (58M v1 模型, 2026-08-02)
+
+v1 模型在 `dataset/qwen_full/test_strata.jsonl`（831 筆，含日期欄位、星期錨定）上的評測（`evaluate_benchmark.py` 全量自迴歸 Greedy 推論）：
 
 | 模型 | 格式通過率 | 精準匹配率 | 金額正確率 | 分類正確率 | 帳戶正確率 | 日期正確率 | 平均 Reward | 延遲 (ms) |
 |------|----------|----------|----------|----------|----------|----------|-----------|---------|
@@ -162,28 +181,39 @@ jijun-ai-training/
 │   └── tokenizer.py          # 自訂記帳 Tokenizer 載入與特殊 Token 註冊器
 ├── trainer/
 │   └── validate_json.py      # 與 PWA 前端對齊的 JSON/壓縮標記雙軌解析器與 RL 獎勵函數
+├── gen/                      # 現行資料產生器（v2~v4c）
+│   ├── build_prompt.py       # system prompt 組裝（tools schema + 日期星期注入，與前端對齊）
+│   ├── build_v3_dataset.py   # v3 日期強化資料集組裝（星期注入 + 純日偏移增廣）
+│   ├── build_short_phrase.py # v4 短語型樣本產生器（物品+金額，train/test 商品詞零重疊）
+│   ├── build_v4c.py          # v4c 短語強化（破先驗金額 + 全新詞泛化探針）
+│   ├── mix_v2_dataset.py     # v2 多工具資料混合
+│   ├── gen_js_tools.py       # tools.schema.json → 前端 toolsSchema.js 同步
+│   └── test_build_prompt.py  # 星期映射金標回歸鎖
 ├── dataset/                  # SFT 訓練與測試語料目錄
-│   ├── train_strata.jsonl    # 訓練集 (3,323 筆)
-│   ├── test_strata.jsonl     # 測試集 (831 筆)
-│   └── qwen_full/            # Qwen 生成原始/過濾後語料與合併檔
-├── saves/                    # 模型 Checkpoint
+│   ├── train_strata.jsonl    # v1 訓練集 (3,323 筆)
+│   ├── test_strata.jsonl     # v1 測試集 (831 筆，守門集；.bak 為原版)
+│   ├── qwen_full/            # Qwen 生成原始/過濾後語料與合併檔
+│   ├── v2/  v3/  v4/  v4c/   # 歷代版本化資料集（v3 日期強化、v4c 短語強化＋泛化探針）
+├── saves/                    # 模型 Checkpoint（.gitignore，權重發佈於 HF the-walking-fish/jijun-LM）
 │   ├── best_bookkeeping_model.pt  # 最佳 SFT 模型 (JSON 版, demo 使用)
 │   ├── compressed/best_bookkeeping_model.pt  # 最佳 SFT 模型 (Compressed 版)
 │   ├── best_pretrain_model.pt     # 預訓練權重
 │   └── backups/                    # 定期備份
 ├── requirements.txt          # Python 依賴安裝清單
-├── generate_dataset.py       # Qwen 大模型批量分層口語樣本生成腳本 (支援斷點續傳、--bias_categories)
-├── filter_dataset.py         # 嚴格語意對齊過濾腳本 (舉證責任倒置，避免誤刪)
+├── restore_hf_checkpoint.py  # HF safetensors → 本機 .pt 權重返還（continue-SFT 起點）
+├── eval_checkpoints.py       # 逐欄位 greedy 評測（任意 .pt × 任意 jsonl）
+├── generate_dataset.py       # [v1 產線] Qwen 大模型批量分層口語樣本生成腳本
+├── filter_dataset.py         # [v1 產線] 嚴格語意對齊過濾腳本（舉證責任倒置）
 ├── split_dataset.py          # 80/20 訓練測試切分腳本
 ├── convert_dataset_dates.py  # 資料集日期標準化腳本
 ├── train_custom_pretrain.py  # 無監督 Wikipedia + 對話混合預訓練腳本 (含 Packing 與比例控制)
-├── train_custom_sft.py       # 雙軌全量 SFT 微調腳本 (含 CPU 驗證防卡死優化)
+├── train_custom_sft.py       # 全量/continue SFT 微調腳本（bf16 AMP + VRAM 上限保護）
 ├── evaluate_benchmark.py     # 分層量化評測腳本 (真實自迴歸 Greedy 推理 vs. Mock 評測)
 ├── verify_model.py           # 語意抽查腳本 (15 句手寫中文查詢 vs 模型輸出)
 ├── demo.py                   # 基於 Gradio 的互動記帳測試網頁
 ├── start_sft.py 等           # 背景執行啟動腳本 (CREATE_NO_WINDOW)
 ├── export_model.py           # ONNX / Llama-GGUF 重映射匯出對齊工具
-└── hf_upload/                # Hugging Face 上傳打包目錄 (模型導出 + 資料集 + 研究文件 + README)
+└── docs/                     # 版本化戰役筆記（t6 v3 日期強化、t7 v4c 短語強化、路線圖）
 ```
 
 ---
@@ -244,12 +274,31 @@ python train_custom_pretrain.py --use_wikipedia --wiki_limit 3000 --save_dir ./s
 python train_custom_pretrain.py --use_wikipedia --wiki_limit 3000 --save_dir ./saves --no_ratio_limit
 ```
 
-### 8.4. 全量 SFT 微調 (Supervised Fine-Tuning)
-以預訓練權重起步進行全量 SFT（現況推薦設定）：
+### 8.4. SFT 微調 (Supervised Fine-Tuning)
+
+**方式 A（現行主流）：從 HF 發佈權重做 continue-SFT**
 ```bash
-# 以預訓練權重起步，並啟用每 epoch 的真實生成評測
+# 1. 下載 HF safetensors 到 hf_ckpt/ 並還原為本機 .pt（自訂命名對齊 model.py）
+mkdir -p hf_ckpt && cd hf_ckpt && for f in config.json tokenizer.json tokenizer_config.json model.safetensors model.safetensors.index.json; do
+  curl -sL -o $f "https://huggingface.co/the-walking-fish/jijun-LM/resolve/main/model-json/$f"
+done && cd ..
+python restore_hf_checkpoint.py   # → saves/jijun_lm_restored.pt
+
+# 2. continue-SFT（低 LR 防災難性遺忘；bf16 + VRAM 上限預設開啟，桌面無感）
+python train_custom_sft.py \
+  --train_path dataset/v4c/train_v4c.jsonl \
+  --val_path   dataset/v4c/val_v4c.jsonl \
+  --pretrained_path saves/jijun_lm_restored.pt \
+  --format json --epochs 4 --lr 5e-5 --batch_size 8 --max_seq_len 768 \
+  --save_dir saves_v4c
+```
+
+**方式 B：從預訓練權重做全量 SFT（v1 流程）**
+```bash
 python train_custom_sft.py --pretrained_path ./saves/best_pretrain_model.pt --format json --eval_generate --max_eval_samples 20 --epochs 8 --lr 2e-4 --batch_size 8 --max_seq_len 1024 --save_dir ./saves
 ```
+
+> **VRAM 保護**：`--amp bf16`（預設）把激活值顯存減半；`--vram_fraction 0.6`（預設）設定進程級 VRAM 硬上限，超過即在訓練進程內報 OOM，**不會**讓 Windows WDDM 把分配擠進共用記憶體拖慢桌面。12GB 卡建議 `--batch_size 8`（峰值整卡含桌面約 8.9GB）。
 
 ### 8.5. 語意抽查驗證 (Semantic Spot Check)
 ```bash
@@ -268,6 +317,11 @@ python export_model.py --ckpt_path ./saves/best_bookkeeping_model.pt --out_dir .
 python evaluate_benchmark.py --model_path ./saves/best_bookkeeping_model.pt --dataset ./dataset/test_strata.jsonl
 ```
 *若 `--model_path` 指定為 `"dummy"`，將會自動啟動模擬評測模式進行流程驗證。*
+
+逐欄位快速評測（任意 checkpoint × 任意 jsonl，greedy 自迴歸，含 format/EM/六欄位正確率與失敗範例）：
+```bash
+python eval_checkpoints.py saves_v4c/best_bookkeeping_model.pt dataset/v4c/regression_v4.jsonl
+```
 
 ---
 
